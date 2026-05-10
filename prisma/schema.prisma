@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WalletType {
+  BANK
+  EWALLET
+  CASH
+  SAVINGS
+  OTHER
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum CategoryType {
+  INCOME
+  EXPENSE
+}
+
+enum BudgetPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  passwordHash String
+  avatarUrl    String?
+  refreshTokens RefreshToken[]
+  wallets      Wallet[]
+  categories   Category[]
+  transactions Transaction[]
+  budgets      Budget[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Wallet {
+  id           String        @id @default(cuid())
+  userId       String
+  name         String
+  type         WalletType
+  color        String
+  icon         String
+  balance      Decimal       @default(0) @db.Decimal(18, 2)
+  isArchived   Boolean       @default(false)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[] @relation("TransactionWallet")
+  transfersOut Transaction[] @relation("TransferFromWallet")
+  transfersIn  Transaction[] @relation("TransferToWallet")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([userId])
+}
+
+model Category {
+  id           String            @id @default(cuid())
+  userId       String?
+  name         String
+  type         CategoryType
+  color        String
+  icon         String
+  isArchived   Boolean           @default(false)
+  isDefault    Boolean           @default(false)
+  user         User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  budgets      Budget[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([type])
+}
+
+model Transaction {
+  id             String          @id @default(cuid())
+  userId         String
+  walletId       String?
+  categoryId     String?
+  fromWalletId   String?
+  toWalletId     String?
+  type           TransactionType
+  title          String
+  amount         Decimal         @db.Decimal(18, 2)
+  note           String?
+  occurredAt     DateTime
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet         Wallet?         @relation("TransactionWallet", fields: [walletId], references: [id])
+  category       Category?       @relation(fields: [categoryId], references: [id])
+  fromWallet     Wallet?         @relation("TransferFromWallet", fields: [fromWalletId], references: [id])
+  toWallet       Wallet?         @relation("TransferToWallet", fields: [toWalletId], references: [id])
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([userId, occurredAt])
+  @@index([walletId])
+  @@index([categoryId])
+  @@index([fromWalletId])
+  @@index([toWalletId])
+  @@index([type])
+}
+
+model Budget {
+  id         String       @id @default(cuid())
+  userId     String
+  categoryId String?
+  name       String
+  period     BudgetPeriod @default(MONTHLY)
+  limitAmount Decimal     @db.Decimal(18, 2)
+  startsAt   DateTime
+  endsAt     DateTime
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category   Category?    @relation(fields: [categoryId], references: [id])
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([userId, startsAt, endsAt])
+  @@index([categoryId])
+  @@unique([userId, categoryId, startsAt, endsAt])
+}
