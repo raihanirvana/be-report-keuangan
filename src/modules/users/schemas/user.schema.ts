@@ -14,9 +14,8 @@ export class User {
   @Prop({ required: true })
   passwordHash!: string;
 
-  @Prop({ default: null })
+  @Prop({ default: null, type: String })
   avatarUrl?: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
-UserSchema.index({ email: 1 }, { unique: true });
