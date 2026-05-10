@@ -11,6 +11,11 @@ import { createHash } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { Model, Types } from 'mongoose';
 
+import { DEFAULT_CATEGORIES } from '../categories/default-categories';
+import {
+  Category,
+  CategoryDocument,
+} from '../categories/schemas/category.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -34,6 +39,8 @@ export class AuthService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(RefreshToken.name)
     private readonly refreshTokenModel: Model<RefreshTokenDocument>,
+    @InjectModel(Category.name)
+    private readonly categoryModel: Model<CategoryDocument>,
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
   ) {}
@@ -52,6 +59,7 @@ export class AuthService {
       name: payload.name.trim(),
       passwordHash,
     });
+    await this.seedDefaultCategories(user.id);
 
     return this.issueAuthTokens(user);
   }
@@ -163,6 +171,16 @@ export class AuthService {
     await this.refreshTokenModel.updateOne(
       { tokenHash: this.hashToken(refreshToken), revokedAt: null },
       { revokedAt: new Date() },
+    );
+  }
+
+  private async seedDefaultCategories(userId: string) {
+    await this.categoryModel.insertMany(
+      DEFAULT_CATEGORIES.map((category) => ({
+        ...category,
+        isDefault: true,
+        userId: new Types.ObjectId(userId),
+      })),
     );
   }
 

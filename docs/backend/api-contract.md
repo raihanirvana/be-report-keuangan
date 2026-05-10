@@ -1,6 +1,6 @@
 # Kawaii Wallet Backend Contract
 
-Target backend: NestJS REST API, MongoDB, JWT auth.
+Target backend: NestJS REST API, MongoDB/Mongoose, JWT auth.
 
 Base URL:
 
@@ -8,7 +8,13 @@ Base URL:
 https://api.example.com/v1
 ```
 
-Common headers:
+Local URL:
+
+```text
+http://localhost:<PORT>/v1
+```
+
+Common authenticated headers:
 
 ```http
 Authorization: Bearer <accessToken>
@@ -25,25 +31,19 @@ Common response envelope:
 }
 ```
 
-Common error envelope:
+Notes:
 
-```json
-{
-  "data": null,
-  "meta": {},
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid request payload",
-    "details": []
-  }
-}
-```
-
-## Auth
+- Money values are integer rupiah amounts.
+- Formatted money strings are convenience fields for the current mobile UI.
+- All protected resources are scoped by authenticated `userId`.
+- Object ids are MongoDB ObjectId strings.
+- Dates use ISO 8601 strings.
 
 ## Health
 
 ### GET /health
+
+Auth: not required.
 
 Response `200`:
 
@@ -60,12 +60,12 @@ Response `200`:
 }
 ```
 
-Used as the first smoke-test endpoint for deployment and mobile API checks.
+## Auth
 
 ### POST /auth/register
 
-No OTP is required. A successful register response should let the mobile app
-store tokens and go straight to the dashboard.
+No OTP. The mobile app should store tokens and go straight to the dashboard.
+On success, backend also creates default user categories.
 
 Request:
 
@@ -85,7 +85,7 @@ Response `201`:
     "accessToken": "jwt-access-token",
     "refreshToken": "jwt-refresh-token",
     "user": {
-      "id": "usr_123",
+      "id": "6650f8e9b9f1f1a001234567",
       "name": "Caca Cute",
       "email": "test@mail.com",
       "avatarUrl": null
@@ -95,6 +95,11 @@ Response `201`:
   "error": null
 }
 ```
+
+Default categories created during register:
+
+- Expense: `Makanan`, `Transport`, `Belanja`, `Main/Hobi`, `Internet/Kuota`, `Kos/Rent`, `Skincare`
+- Income: `Gaji`, `Freelance`, `Hadiah`
 
 ### POST /auth/login
 
@@ -132,6 +137,8 @@ Response `200`:
 }
 ```
 
+Behavior: refresh token is rotated. The old refresh token is revoked.
+
 ### POST /auth/logout
 
 Request:
@@ -148,12 +155,14 @@ Response `204`: empty body.
 
 ### GET /me
 
+Auth: required.
+
 Response `200`:
 
 ```json
 {
   "data": {
-    "id": "usr_123",
+    "id": "6650f8e9b9f1f1a001234567",
     "name": "Caca Cute",
     "email": "test@mail.com",
     "avatarUrl": null
@@ -167,13 +176,18 @@ Response `200`:
 
 ### GET /dashboard/summary
 
+Auth: required.
+
 Query:
 
 ```text
 month=2024-05&walletId=all
 ```
 
-`month` follows `YYYY-MM`. `walletId` can be `all` or a wallet id.
+Query params:
+
+- `month`: optional, `YYYY-MM`. Defaults to current month.
+- `walletId`: optional. Use `all` or omit for total assets.
 
 Response `200`:
 
@@ -204,7 +218,7 @@ Response `200`:
       "expenseTotal": 850000,
       "categories": [
         {
-          "categoryId": "cat_food",
+          "categoryId": "6650f8e9b9f1f1a001234568",
           "name": "Makanan",
           "color": "#EE2B6C",
           "amount": 255000,
@@ -217,7 +231,16 @@ Response `200`:
       "limitAmount": 5000000,
       "percentage": 60
     },
-    "latestTransactions": []
+    "latestTransactions": [
+      {
+        "id": "6650f8e9b9f1f1a001234569",
+        "type": "EXPENSE",
+        "title": "Mixue Boba",
+        "amount": 16000,
+        "formattedAmount": "- Rp 16.000",
+        "occurredAt": "2024-05-24T14:20:00.000Z"
+      }
+    ]
   },
   "meta": {
     "month": "2024-05"
@@ -226,12 +249,18 @@ Response `200`:
 }
 ```
 
-`latestTransactions` should return at most 4 items for the dashboard preview.
-Use `GET /transactions` for the full history bottom sheet.
+Behavior:
+
+- `latestTransactions` returns at most 4 items.
+- `income` and `expense` are calculated from transactions in the selected month.
+- `balance` is total active wallet balance when `walletId=all`.
+- `budgetLimit` is calculated from monthly budgets. For specific wallet views it currently returns zeroed budget summary.
 
 ## Wallets
 
 ### GET /wallets
+
+Auth: required.
 
 Response `200`:
 
@@ -239,10 +268,10 @@ Response `200`:
 {
   "data": [
     {
-      "id": "wlt_bca",
+      "id": "6650f8e9b9f1f1a001234570",
       "name": "ATM BCA",
       "type": "BANK",
-      "icon": "bank",
+      "icon": "account_balance",
       "color": "#4EA8DE",
       "balance": 5250000,
       "formattedBalance": "Rp 5.250k"
@@ -253,7 +282,7 @@ Response `200`:
 }
 ```
 
-If the user has not created any wallet yet, return an empty array:
+Empty state:
 
 ```json
 {
@@ -265,13 +294,15 @@ If the user has not created any wallet yet, return an empty array:
 
 ### POST /wallets
 
+Auth: required.
+
 Request:
 
 ```json
 {
   "name": "BCA Saya",
   "type": "BANK",
-  "icon": "qr_code",
+  "icon": "account_balance",
   "color": "#EE2B6C",
   "initialBalance": 1120000
 }
@@ -283,13 +314,15 @@ Response `201`: wallet object.
 
 ### PATCH /wallets/:walletId
 
+Auth: required.
+
 Request:
 
 ```json
 {
   "name": "BCA Saya",
   "color": "#4EA8DE",
-  "icon": "bank"
+  "icon": "account_balance"
 }
 ```
 
@@ -297,13 +330,17 @@ Response `200`: wallet object.
 
 ### DELETE /wallets/:walletId
 
-Behavior: archive wallet if it has transactions.
+Auth: required.
 
 Response `204`: empty body.
+
+Behavior: wallet is archived with `isArchived=true`.
 
 ## Categories
 
 ### GET /categories
+
+Auth: required.
 
 Query:
 
@@ -311,13 +348,18 @@ Query:
 type=EXPENSE&includeArchived=false
 ```
 
+Query params:
+
+- `type`: optional, `INCOME` or `EXPENSE`.
+- `includeArchived`: optional boolean string. Defaults to `false`.
+
 Response `200`:
 
 ```json
 {
   "data": [
     {
-      "id": "cat_food",
+      "id": "6650f8e9b9f1f1a001234571",
       "name": "Makanan",
       "type": "EXPENSE",
       "icon": "restaurant",
@@ -331,6 +373,8 @@ Response `200`:
 ```
 
 ### POST /categories
+
+Auth: required.
 
 Request:
 
@@ -347,6 +391,8 @@ Response `201`: category object.
 
 ### PATCH /categories/:categoryId
 
+Auth: required.
+
 Request:
 
 ```json
@@ -361,22 +407,31 @@ Response `200`: category object.
 
 ### DELETE /categories/:categoryId
 
-Behavior: archive category if it has transactions or budgets.
+Auth: required.
 
 Response `204`: empty body.
+
+Behavior: user category is archived with `isArchived=true`.
 
 ## Transactions
 
 ### GET /transactions
 
+Auth: required.
+
 Query:
 
 ```text
-month=2024-05&type=EXPENSE&walletId=wlt_bca&page=1&limit=20
+month=2024-05&type=EXPENSE&walletId=6650f8e9b9f1f1a001234570&page=1&limit=20
 ```
 
-All query params are optional except `page` and `limit` if pagination is used.
-Allowed `type`: `INCOME`, `EXPENSE`, `TRANSFER`.
+Query params:
+
+- `month`: optional, `YYYY-MM`.
+- `type`: optional, `INCOME`, `EXPENSE`, or `TRANSFER`.
+- `walletId`: optional. Matches `walletId`, `fromWalletId`, or `toWalletId`.
+- `page`: optional, defaults to `1`.
+- `limit`: optional, defaults to `20`.
 
 Response `200`:
 
@@ -384,7 +439,7 @@ Response `200`:
 {
   "data": [
     {
-      "id": "trx_123",
+      "id": "6650f8e9b9f1f1a001234572",
       "type": "EXPENSE",
       "title": "Mixue Boba",
       "amount": 16000,
@@ -392,13 +447,13 @@ Response `200`:
       "note": null,
       "occurredAt": "2024-05-24T14:20:00.000Z",
       "wallet": {
-        "id": "wlt_bca",
+        "id": "6650f8e9b9f1f1a001234570",
         "name": "BCA"
       },
       "category": {
-        "id": "cat_food",
+        "id": "6650f8e9b9f1f1a001234571",
         "name": "Makanan",
-        "icon": "icecream",
+        "icon": "restaurant",
         "color": "#EE2B6C"
       },
       "fromWallet": null,
@@ -416,6 +471,8 @@ Response `200`:
 
 ### POST /transactions
 
+Auth: required.
+
 For income or expense:
 
 ```json
@@ -423,8 +480,8 @@ For income or expense:
   "type": "EXPENSE",
   "title": "Sushi Yay!",
   "amount": 85000,
-  "walletId": "wlt_bca",
-  "categoryId": "cat_food",
+  "walletId": "6650f8e9b9f1f1a001234570",
+  "categoryId": "6650f8e9b9f1f1a001234571",
   "note": "Dinner",
   "occurredAt": "2024-05-24T12:30:00.000Z"
 }
@@ -437,74 +494,61 @@ For transfer:
   "type": "TRANSFER",
   "title": "Monthly saving",
   "amount": 250000,
-  "fromWalletId": "wlt_bca",
-  "toWalletId": "wlt_savings",
+  "fromWalletId": "6650f8e9b9f1f1a001234570",
+  "toWalletId": "6650f8e9b9f1f1a001234573",
   "note": "Tabungan bulanan",
   "occurredAt": "2024-05-24T12:30:00.000Z"
 }
 ```
 
-Response `201`:
+Response `201`: transaction object.
 
-```json
-{
-  "data": {
-    "id": "trx_123",
-    "type": "EXPENSE",
-    "title": "Sushi Yay!",
-    "amount": 85000,
-    "occurredAt": "2024-05-24T12:30:00.000Z"
-  },
-  "meta": {},
-  "error": null
-}
-```
+Behavior:
 
-Transfer response objects should include `fromWallet` and `toWallet` instead
-of `wallet` and `category`:
-
-```json
-{
-  "data": {
-    "id": "trx_transfer",
-    "type": "TRANSFER",
-    "title": "Monthly saving",
-    "amount": 250000,
-    "formattedAmount": "Rp 250.000",
-    "occurredAt": "2024-05-24T12:30:00.000Z",
-    "fromWallet": {
-      "id": "wlt_bca",
-      "name": "BCA"
-    },
-    "toWallet": {
-      "id": "wlt_savings",
-      "name": "Savings"
-    }
-  },
-  "meta": {},
-  "error": null
-}
-```
+- `INCOME` requires `walletId` and `categoryId`.
+- `EXPENSE` requires `walletId` and `categoryId`.
+- `TRANSFER` requires `fromWalletId` and `toWalletId`.
+- `TRANSFER` source and destination wallet must be different.
+- `INCOME` category must have type `INCOME`.
+- `EXPENSE` category must have type `EXPENSE`.
+- `INCOME` increments wallet balance.
+- `EXPENSE` decrements wallet balance.
+- `TRANSFER` decrements source wallet and increments destination wallet.
+- If `occurredAt` is omitted, backend uses current time.
 
 ### PATCH /transactions/:transactionId
 
-Request: same fields as `POST /transactions`, all optional except valid transaction relation rules.
+Auth: required.
+
+Request: same fields as `POST /transactions`, all optional.
 
 Response `200`: transaction object.
 
+Behavior: backend reverses the old transaction balance effect, stores the new values, then applies the new balance effect.
+
 ### DELETE /transactions/:transactionId
 
+Auth: required.
+
 Response `204`: empty body.
+
+Behavior: backend reverses the transaction balance effect, then deletes the transaction.
 
 ## Budgets
 
 ### GET /budgets
+
+Auth: required.
 
 Query:
 
 ```text
 month=2024-05
 ```
+
+Query params:
+
+- `month`: optional, `YYYY-MM`. Defaults to current month.
 
 Response `200`:
 
@@ -518,26 +562,15 @@ Response `200`:
     },
     "items": [
       {
-        "id": "bdg_internet",
+        "id": "6650f8e9b9f1f1a001234574",
         "name": "Internet/Kuota",
-        "categoryId": "cat_internet",
+        "categoryId": "6650f8e9b9f1f1a001234575",
         "icon": "wifi",
         "color": "#4EA8DE",
         "usedAmount": 750000,
         "limitAmount": 1000000,
         "percentage": 75,
         "statusLabel": "75%"
-      },
-      {
-        "id": "bdg_rent",
-        "name": "Kos/Rent",
-        "categoryId": "cat_rent",
-        "icon": "home",
-        "color": "#EE2B6C",
-        "usedAmount": 1200000,
-        "limitAmount": 1200000,
-        "percentage": 100,
-        "statusLabel": "100%"
       }
     ]
   },
@@ -548,7 +581,7 @@ Response `200`:
 }
 ```
 
-Empty state response:
+Empty state:
 
 ```json
 {
@@ -571,25 +604,30 @@ Empty state response:
 }
 ```
 
+Behavior:
+
+- `usedAmount` is calculated from `EXPENSE` transactions in the selected month.
+- Budget categories must be `EXPENSE` categories.
+- `statusLabel` is always percentage text, including `100%`.
+
 ### POST /budgets
 
-Request:
+Auth: required.
+
+With existing category:
 
 ```json
 {
   "name": "Food",
-  "categoryId": "cat_food",
+  "categoryId": "6650f8e9b9f1f1a001234571",
   "period": "MONTHLY",
   "limitAmount": 1500000,
   "startsAt": "2024-05-01T00:00:00.000Z",
-  "endsAt": "2024-05-31T23:59:59.999Z"
+  "endsAt": "2024-06-01T00:00:00.000Z"
 }
 ```
 
-Response `201`: budget object.
-
-For the mobile "Tambah Kategori Baru" flow in the limit detail sheet, the
-backend can support a combined category + budget request:
+With new category:
 
 ```json
 {
@@ -601,16 +639,25 @@ backend can support a combined category + budget request:
   "period": "MONTHLY",
   "limitAmount": 500000,
   "startsAt": "2024-05-01T00:00:00.000Z",
-  "endsAt": "2024-05-31T23:59:59.999Z"
+  "endsAt": "2024-06-01T00:00:00.000Z"
 }
 ```
 
-If `category` is provided, backend creates an `EXPENSE` category and attaches
-the budget to it in one transaction.
+Allowed `period`: `MONTHLY`.
+
+Response `201`: budget item object.
+
+Behavior:
+
+- If `category` is provided, backend creates an `EXPENSE` category.
+- If a budget for the same category and same `startsAt` already exists, backend updates that budget.
+- `startsAt` must be earlier than `endsAt`.
 
 ### POST /budgets/copy-previous-month
 
-Used by the mobile empty state action `Pakai Aturan Bulan Kemarin`.
+Auth: required.
+
+Used by FE action `Pakai Batas Bulan Kemarin`.
 
 Request:
 
@@ -633,11 +680,11 @@ Response `201`:
     },
     "items": [
       {
-        "id": "bdg_food_may",
+        "id": "6650f8e9b9f1f1a001234576",
         "name": "Food",
-        "categoryId": "cat_food",
-        "icon": "lunch_dining",
-        "color": "#FBCF33",
+        "categoryId": "6650f8e9b9f1f1a001234571",
+        "icon": "restaurant",
+        "color": "#EE2B6C",
         "usedAmount": 0,
         "limitAmount": 1500000,
         "percentage": 0,
@@ -655,40 +702,42 @@ Response `201`:
 
 Behavior:
 
-- Copy category links, names, period, and `limitAmount` from `sourceMonth`.
-- Do not copy `usedAmount` or transactions.
-- If a copied category budget already exists in `targetMonth`, keep one record
-  and update its `limitAmount`.
+- Copies category links, names, period, and `limitAmount`.
+- Does not copy `usedAmount` or transactions.
+- If target month already has a copied category budget, backend updates its `limitAmount`.
 
 ### PATCH /budgets/:budgetId
+
+Auth: required.
 
 Request:
 
 ```json
 {
+  "name": "Food",
   "limitAmount": 2000000
 }
 ```
 
-Response `200`: budget object.
+Response `200`: budget item object.
 
 ### DELETE /budgets/:budgetId
 
+Auth: required.
+
 Response `204`: empty body.
 
-## Backend Validation Rules
+Behavior: budget is archived with `isArchived=true`.
 
-- Money is sent as integer rupiah amount, not formatted strings.
-- `INCOME` requires `walletId`.
-- `EXPENSE` requires `walletId` and `categoryId`.
-- `TRANSFER` requires `fromWalletId` and `toWalletId`.
-- `TRANSFER` cannot use the same wallet for source and destination.
-- `Category.type` only supports `INCOME` and `EXPENSE`.
-- `Budget.categoryId` should point to an `EXPENSE` category.
-- Budget `statusLabel` should remain percentage text, including `100%`.
-- `amount` must be greater than `0`.
-- `occurredAt` must be ISO 8601.
-- All resources are scoped by authenticated `userId`.
-- Deleting wallet should archive it when transaction history exists.
-- Deleting category should archive it when transaction or budget history exists.
-- Balance updates should happen in a database transaction.
+## Validation Summary
+
+- `amount`, `initialBalance`, and `limitAmount` are integer rupiah values.
+- `amount` and `limitAmount` must be greater than `0`.
+- `initialBalance` must be at least `0`.
+- `color` must be a hex color string.
+- `occurredAt`, `startsAt`, and `endsAt` must be ISO 8601 strings.
+- `month`, `sourceMonth`, and `targetMonth` use `YYYY-MM`.
+- `Category.type`: `INCOME`, `EXPENSE`.
+- `Transaction.type`: `INCOME`, `EXPENSE`, `TRANSFER`.
+- `Wallet.type`: `BANK`, `EWALLET`, `CASH`, `SAVINGS`, `OTHER`.
+- `Budget.period`: `MONTHLY`.

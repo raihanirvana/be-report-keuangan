@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 
+import {
+  Category,
+  CategorySchema,
+} from '../categories/schemas/category.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { AccessTokenGuard } from './access-token.guard';
 import { AuthController } from './auth.controller';
@@ -23,6 +27,10 @@ import {
       {
         name: User.name,
         schema: UserSchema,
+      },
+      {
+        name: Category.name,
+        schema: CategorySchema,
       },
     ]),
   ],

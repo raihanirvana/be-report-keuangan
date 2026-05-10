@@ -47,7 +47,6 @@ export class CategoriesService {
       {
         _id: this.toObjectId(categoryId),
         isArchived: false,
-        isDefault: false,
         userId: new Types.ObjectId(userId),
       },
       this.getUpdatePayload(payload),
@@ -66,7 +65,6 @@ export class CategoriesService {
       {
         _id: this.toObjectId(categoryId),
         isArchived: false,
-        isDefault: false,
         userId: new Types.ObjectId(userId),
       },
       { isArchived: true },
