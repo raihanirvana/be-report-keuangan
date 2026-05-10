@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import {
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Max,
@@ -14,8 +15,24 @@ class EnvironmentVariables {
   APP_NAME?: string;
 
   @IsString()
+  @IsNotEmpty()
+  JWT_ACCESS_SECRET!: string;
+
+  @IsString()
   @IsOptional()
-  MONGODB_URI?: string;
+  JWT_ACCESS_EXPIRES_IN?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_REFRESH_SECRET!: string;
+
+  @IsString()
+  @IsOptional()
+  JWT_REFRESH_EXPIRES_IN?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  MONGODB_URI!: string;
 
   @IsInt()
   @Max(65535)
