@@ -4,10 +4,13 @@ export type ResponseEnvelope<TData, TMeta = Record<string, never>> = {
   meta: TMeta;
 };
 
-export function envelope<TData>(data: TData): ResponseEnvelope<TData> {
+export function envelope<TData, TMeta = Record<string, never>>(
+  data: TData,
+  meta?: TMeta,
+): ResponseEnvelope<TData, TMeta> {
   return {
     data,
     error: null,
-    meta: {},
+    meta: meta ?? ({} as TMeta),
   };
 }
