@@ -22,13 +22,13 @@ import { TransactionResponse } from './transactions.types';
 type PreparedTransaction = {
   amount: number;
   categoryId: Types.ObjectId | null;
-  fromWalletId: Types.ObjectId | null;
+  fromWalletName: string | null;
   note: string | null;
   occurredAt: Date;
   title: string;
-  toWalletId: Types.ObjectId | null;
+  toWalletName: string | null;
   type: TransactionType;
-  walletId: Types.ObjectId | null;
+  walletName: string | null;
 };
 
 type FindAllResult = {
@@ -42,9 +42,9 @@ type FindAllResult = {
 
 type TransactionFilter = {
   $or?: Array<
-    | { fromWalletId: Types.ObjectId }
-    | { toWalletId: Types.ObjectId }
-    | { walletId: Types.ObjectId }
+    | { fromWalletName: string }
+    | { toWalletName: string }
+    | { walletName: string }
   >;
   occurredAt?: {
     $gte: Date;
@@ -71,7 +71,7 @@ export class TransactionsService {
   ): Promise<FindAllResult> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const filter = this.getFindFilter(userId, query);
+    const filter = await this.getFindFilter(userId, query);
     const [transactions, total] = await Promise.all([
       this.transactionModel
         .find(filter)
@@ -120,16 +120,17 @@ export class TransactionsService {
         this.optionalObjectIdToString(transaction.categoryId),
       fromWalletId:
         payload.fromWalletId ??
-        this.optionalObjectIdToString(transaction.fromWalletId),
+        (await this.findWalletIdByName(userId, transaction.fromWalletName)),
       note: payload.note ?? transaction.note ?? undefined,
       occurredAt: payload.occurredAt ?? transaction.occurredAt.toISOString(),
       title: payload.title ?? transaction.title,
       toWalletId:
         payload.toWalletId ??
-        this.optionalObjectIdToString(transaction.toWalletId),
+        (await this.findWalletIdByName(userId, transaction.toWalletName)),
       type: payload.type ?? transaction.type,
       walletId:
-        payload.walletId ?? this.optionalObjectIdToString(transaction.walletId),
+        payload.walletId ??
+        (await this.findWalletIdByName(userId, transaction.walletName)),
     });
 
     await this.applyBalanceEffect(userId, transaction, -1);
@@ -190,15 +191,15 @@ export class TransactionsService {
     return {
       amount: payload.amount,
       categoryId: category._id,
-      fromWalletId: null,
+      fromWalletName: null,
       note: this.normalizeNote(payload.note),
       occurredAt: payload.occurredAt
         ? new Date(payload.occurredAt)
         : new Date(),
       title: payload.title.trim(),
-      toWalletId: null,
+      toWalletName: null,
       type: payload.type,
-      walletId: wallet._id,
+      walletName: wallet.name,
     };
   }
 
@@ -222,15 +223,15 @@ export class TransactionsService {
     return {
       amount: payload.amount,
       categoryId: null,
-      fromWalletId: fromWallet._id,
+      fromWalletName: fromWallet.name,
       note: this.normalizeNote(payload.note),
       occurredAt: payload.occurredAt
         ? new Date(payload.occurredAt)
         : new Date(),
       title: payload.title.trim(),
-      toWalletId: toWallet._id,
+      toWalletName: toWallet.name,
       type: payload.type,
-      walletId: null,
+      walletName: null,
     };
   }
 
@@ -268,38 +269,47 @@ export class TransactionsService {
     multiplier: 1 | -1,
   ) {
     const amount = transaction.amount * multiplier;
+    const walletName =
+      transaction.walletName ??
+      (await this.findLegacyWalletName(userId, transaction, 'walletId'));
+    const fromWalletName =
+      transaction.fromWalletName ??
+      (await this.findLegacyWalletName(userId, transaction, 'fromWalletId'));
+    const toWalletName =
+      transaction.toWalletName ??
+      (await this.findLegacyWalletName(userId, transaction, 'toWalletId'));
 
-    if (transaction.type === TransactionType.Income && transaction.walletId) {
-      await this.incrementWallet(userId, transaction.walletId, amount);
+    if (transaction.type === TransactionType.Income && walletName) {
+      await this.incrementWallet(userId, walletName, amount);
       return;
     }
 
-    if (transaction.type === TransactionType.Expense && transaction.walletId) {
-      await this.incrementWallet(userId, transaction.walletId, -amount);
+    if (transaction.type === TransactionType.Expense && walletName) {
+      await this.incrementWallet(userId, walletName, -amount);
       return;
     }
 
     if (
       transaction.type === TransactionType.Transfer &&
-      transaction.fromWalletId &&
-      transaction.toWalletId
+      fromWalletName &&
+      toWalletName
     ) {
       await Promise.all([
-        this.incrementWallet(userId, transaction.fromWalletId, -amount),
-        this.incrementWallet(userId, transaction.toWalletId, amount),
+        this.incrementWallet(userId, fromWalletName, -amount),
+        this.incrementWallet(userId, toWalletName, amount),
       ]);
     }
   }
 
   private async incrementWallet(
     userId: string,
-    walletId: Types.ObjectId,
+    walletName: string,
     amount: number,
   ) {
     await this.walletModel.updateOne(
       {
-        _id: walletId,
         isArchived: false,
+        name: walletName,
         userId: new Types.ObjectId(userId),
       },
       { $inc: { balance: amount } },
@@ -313,13 +323,13 @@ export class TransactionsService {
   }
 
   private async toTransactionResponses(transactions: TransactionDocument[]) {
-    const walletIds = new Set<string>();
     const categoryIds = new Set<string>();
+    const walletIds = new Set<string>();
 
     for (const transaction of transactions) {
-      this.addOptionalId(walletIds, transaction.walletId);
-      this.addOptionalId(walletIds, transaction.fromWalletId);
-      this.addOptionalId(walletIds, transaction.toWalletId);
+      this.addLegacyWalletId(walletIds, transaction, 'walletId');
+      this.addLegacyWalletId(walletIds, transaction, 'fromWalletId');
+      this.addLegacyWalletId(walletIds, transaction, 'toWalletId');
       this.addOptionalId(categoryIds, transaction.categoryId);
     }
 
@@ -333,14 +343,20 @@ export class TransactionsService {
     );
 
     return transactions.map((transaction) => {
-      const wallet = this.getOptionalDocument(walletMap, transaction.walletId);
-      const fromWallet = this.getOptionalDocument(
+      const wallet = this.getWalletSummary(
         walletMap,
-        transaction.fromWalletId,
+        this.getLegacyWalletId(transaction, 'walletId'),
+        transaction.walletName,
       );
-      const toWallet = this.getOptionalDocument(
+      const fromWallet = this.getWalletSummary(
         walletMap,
-        transaction.toWalletId,
+        this.getLegacyWalletId(transaction, 'fromWalletId'),
+        transaction.fromWalletName,
+      );
+      const toWallet = this.getWalletSummary(
+        walletMap,
+        this.getLegacyWalletId(transaction, 'toWalletId'),
+        transaction.toWalletName,
       );
       const category = this.getOptionalDocument(
         categoryMap,
@@ -358,24 +374,22 @@ export class TransactionsService {
             }
           : null,
         formattedAmount: this.formatAmount(transaction),
-        fromWallet: fromWallet
-          ? { id: fromWallet.id, name: fromWallet.name }
-          : null,
+        fromWallet,
         id: transaction.id,
         note: transaction.note ?? null,
         occurredAt: transaction.occurredAt.toISOString(),
         title: transaction.title,
-        toWallet: toWallet ? { id: toWallet.id, name: toWallet.name } : null,
+        toWallet,
         type: transaction.type,
-        wallet: wallet ? { id: wallet.id, name: wallet.name } : null,
+        wallet,
       };
     });
   }
 
-  private getFindFilter(
+  private async getFindFilter(
     userId: string,
     query: FindTransactionsQueryDto,
-  ): TransactionFilter {
+  ): Promise<TransactionFilter> {
     const filter: TransactionFilter = {
       userId: new Types.ObjectId(userId),
       ...(query.type ? { type: query.type } : {}),
@@ -389,11 +403,11 @@ export class TransactionsService {
     }
 
     if (query.walletId) {
-      const walletId = this.toObjectId(query.walletId);
+      const wallet = await this.findUserWallet(userId, query.walletId);
       filter.$or = [
-        { walletId },
-        { fromWalletId: walletId },
-        { toWalletId: walletId },
+        { walletName: wallet.name },
+        { fromWalletName: wallet.name },
+        { toWalletName: wallet.name },
       ];
     }
 
@@ -434,11 +448,90 @@ export class TransactionsService {
     }
   }
 
+  private addLegacyWalletId(
+    ids: Set<string>,
+    transaction: TransactionDocument,
+    fieldName: 'fromWalletId' | 'toWalletId' | 'walletId',
+  ) {
+    this.addOptionalId(ids, this.getLegacyWalletId(transaction, fieldName));
+  }
+
+  private async findWalletIdByName(userId: string, walletName?: string | null) {
+    if (!walletName) {
+      return undefined;
+    }
+
+    const wallet = await this.walletModel.findOne({
+      isArchived: false,
+      name: walletName,
+      userId: new Types.ObjectId(userId),
+    });
+
+    return wallet?.id;
+  }
+
+  private async findLegacyWalletName(
+    userId: string,
+    transaction: TransactionDocument,
+    fieldName: 'fromWalletId' | 'toWalletId' | 'walletId',
+  ) {
+    const walletId = this.getLegacyWalletId(transaction, fieldName);
+
+    if (!walletId) {
+      return null;
+    }
+
+    const wallet = await this.walletModel.findOne({
+      _id: walletId,
+      isArchived: false,
+      userId: new Types.ObjectId(userId),
+    });
+
+    return wallet?.name ?? null;
+  }
+
   private getOptionalDocument<TDocument extends { id: string }>(
     documents: Map<string, TDocument>,
     id?: Types.ObjectId | null,
   ) {
     return id ? documents.get(id.toString()) : undefined;
+  }
+
+  private getWalletSummary(
+    wallets: Map<string, WalletDocument>,
+    id?: Types.ObjectId | null,
+    snapshotName?: string | null,
+  ) {
+    const wallet = id ? this.getOptionalDocument(wallets, id) : undefined;
+    const walletName = snapshotName ?? wallet?.name;
+
+    if (!walletName) {
+      return null;
+    }
+
+    return {
+      name: walletName,
+    };
+  }
+
+  private getLegacyWalletId(
+    transaction: TransactionDocument,
+    fieldName: 'fromWalletId' | 'toWalletId' | 'walletId',
+  ) {
+    const legacyValue = transaction.get(fieldName) as unknown;
+
+    if (legacyValue instanceof Types.ObjectId) {
+      return legacyValue;
+    }
+
+    if (
+      typeof legacyValue === 'string' &&
+      Types.ObjectId.isValid(legacyValue)
+    ) {
+      return new Types.ObjectId(legacyValue);
+    }
+
+    return null;
   }
 
   private toObjectId(id: string) {

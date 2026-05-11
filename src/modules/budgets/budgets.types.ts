@@ -1,6 +1,7 @@
 export type BudgetItemResponse = {
   categoryId: string;
   color: string;
+  documentId: string;
   icon: string;
   id: string;
   limitAmount: number;
@@ -17,7 +18,9 @@ export type BudgetSummaryResponse = {
 };
 
 export type BudgetsResponse = {
+  documentId: string | null;
   items: BudgetItemResponse[];
+  month: string;
   previousMonth?: {
     available: boolean;
     month: string;

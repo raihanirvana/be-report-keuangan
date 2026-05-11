@@ -70,7 +70,8 @@ export class BudgetsController {
   async remove(
     @CurrentUser() user: JwtPayload,
     @Param('budgetId') budgetId: string,
+    @Query() query: FindBudgetsQueryDto,
   ) {
-    await this.budgetsService.remove(user.sub, budgetId);
+    await this.budgetsService.remove(user.sub, budgetId, query.month);
   }
 }

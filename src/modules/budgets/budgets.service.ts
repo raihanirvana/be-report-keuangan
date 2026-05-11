@@ -54,134 +54,172 @@ export class BudgetsService {
   }
 
   async create(userId: string, payload: CreateBudgetDto) {
-    const category = await this.resolveCategory(userId, payload);
-    const startsAt = new Date(payload.startsAt);
-    const endsAt = new Date(payload.endsAt);
-
-    if (startsAt >= endsAt) {
-      throw new BadRequestException(
-        'Tanggal mulai harus sebelum tanggal akhir',
-      );
-    }
-
-    const budget = await this.budgetModel.findOneAndUpdate(
-      {
-        categoryId: category._id,
-        isArchived: false,
-        startsAt,
-        userId: new Types.ObjectId(userId),
-      },
-      {
-        categoryId: category._id,
-        endsAt,
-        limitAmount: payload.limitAmount,
-        name: payload.name?.trim() ?? category.name,
-        period: payload.period,
-      },
-      { new: true, upsert: true },
+    const monthRange = this.getMonthRange(payload.month);
+    const category = await this.findCategoryById(
+      userId,
+      this.toObjectId(payload.categoryId),
+    );
+    const budget = await this.findOrCreateMonthlyBudget(userId, monthRange);
+    const existingItem = budget.items.find((item) =>
+      item.categoryId.equals(category._id),
     );
 
-    return this.toBudgetItemResponse(budget, category, 0);
+    if (existingItem) {
+      existingItem.limitAmount = payload.limitAmount;
+    } else {
+      budget.items.push({
+        categoryId: category._id,
+        limitAmount: payload.limitAmount,
+      });
+    }
+
+    await budget.save();
+
+    return this.toBudgetItemResponse(
+      budget.id,
+      category,
+      payload.limitAmount,
+      await this.getUsedAmountByCategory(
+        userId,
+        category._id,
+        monthRange.start,
+        monthRange.end,
+      ),
+    );
   }
 
   async copyPreviousMonth(userId: string, payload: CopyPreviousMonthDto) {
     const sourceRange = this.getMonthRange(payload.sourceMonth);
     const targetRange = this.getMonthRange(payload.targetMonth);
-    const sourceBudgets = await this.budgetModel.find({
-      isArchived: false,
-      startsAt: { $gte: sourceRange.start, $lt: sourceRange.end },
+    const sourceBudget = await this.budgetModel.findOne({
+      month: sourceRange.month,
       userId: new Types.ObjectId(userId),
     });
 
-    await Promise.all(
-      sourceBudgets.map((budget) =>
-        this.budgetModel.findOneAndUpdate(
-          {
-            categoryId: budget.categoryId,
-            isArchived: false,
-            startsAt: targetRange.start,
-            userId: new Types.ObjectId(userId),
-          },
-          {
-            categoryId: budget.categoryId,
-            endsAt: targetRange.end,
-            limitAmount: budget.limitAmount,
-            name: budget.name,
-            period: budget.period,
-          },
-          { new: true, upsert: true },
-        ),
-      ),
+    if (!sourceBudget?.items.length) {
+      throw new BadRequestException('Batas bulan kemarin belum tersedia');
+    }
+
+    await this.budgetModel.findOneAndUpdate(
+      {
+        month: targetRange.month,
+        userId: new Types.ObjectId(userId),
+      },
+      {
+        endsAt: targetRange.end,
+        items: sourceBudget.items.map((item) => ({
+          categoryId: item.categoryId,
+          limitAmount: item.limitAmount,
+        })),
+        month: targetRange.month,
+        startsAt: targetRange.start,
+        userId: new Types.ObjectId(userId),
+      },
+      { new: true, upsert: true },
     );
 
     return this.getBudgetSummary(userId, targetRange);
   }
 
   async update(userId: string, budgetId: string, payload: UpdateBudgetDto) {
-    const budget = await this.budgetModel.findOneAndUpdate(
-      {
-        _id: this.toObjectId(budgetId),
-        isArchived: false,
-        userId: new Types.ObjectId(userId),
-      },
-      {
-        ...(payload.limitAmount ? { limitAmount: payload.limitAmount } : {}),
-        ...(payload.name ? { name: payload.name.trim() } : {}),
-      },
-      { new: true },
-    );
+    const monthRange = this.getMonthRange(payload.month);
+    const categoryId = this.toObjectId(budgetId);
+    const budget = await this.budgetModel.findOne({
+      month: monthRange.month,
+      userId: new Types.ObjectId(userId),
+    });
 
     if (!budget) {
       throw new NotFoundException('Batas pengeluaran tidak ditemukan');
     }
 
-    const category = await this.findCategoryById(userId, budget.categoryId);
+    const item = budget.items.find((budgetItem) =>
+      budgetItem.categoryId.equals(categoryId),
+    );
+
+    if (!item) {
+      throw new NotFoundException('Batas pengeluaran tidak ditemukan');
+    }
+
+    if (payload.limitAmount) {
+      item.limitAmount = payload.limitAmount;
+    }
+
+    await budget.save();
+
+    const category = await this.findCategoryById(userId, categoryId);
     const usedAmount = await this.getUsedAmountByCategory(
       userId,
-      budget.categoryId,
-      budget.startsAt,
-      budget.endsAt,
+      categoryId,
+      monthRange.start,
+      monthRange.end,
     );
 
-    return this.toBudgetItemResponse(budget, category, usedAmount);
+    return this.toBudgetItemResponse(
+      budget.id,
+      category,
+      item.limitAmount,
+      usedAmount,
+    );
   }
 
-  async remove(userId: string, budgetId: string) {
-    const budget = await this.budgetModel.findOneAndUpdate(
-      {
-        _id: this.toObjectId(budgetId),
-        isArchived: false,
-        userId: new Types.ObjectId(userId),
-      },
-      { isArchived: true },
-    );
+  async remove(userId: string, budgetId: string, month?: string) {
+    const monthRange = this.getMonthRange(month);
+    const categoryId = this.toObjectId(budgetId);
+    const budget = await this.budgetModel.findOne({
+      month: monthRange.month,
+      userId: new Types.ObjectId(userId),
+    });
 
     if (!budget) {
       throw new NotFoundException('Batas pengeluaran tidak ditemukan');
     }
+
+    const currentLength = budget.items.length;
+    budget.items = budget.items.filter(
+      (item) => !item.categoryId.equals(categoryId),
+    );
+
+    if (budget.items.length === currentLength) {
+      throw new NotFoundException('Batas pengeluaran tidak ditemukan');
+    }
+
+    await budget.save();
   }
 
   private async getBudgetSummary(
     userId: string,
     monthRange: MonthRange,
   ): Promise<BudgetsResponse> {
-    const budgets = await this.budgetModel
-      .find({
-        isArchived: false,
-        startsAt: { $gte: monthRange.start, $lt: monthRange.end },
-        userId: new Types.ObjectId(userId),
-      })
-      .sort({ createdAt: 1 });
+    const budget = await this.budgetModel.findOne({
+      month: monthRange.month,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!budget?.items.length) {
+      return {
+        documentId: budget?.id ?? null,
+        items: [],
+        month: monthRange.month,
+        previousMonth: await this.getPreviousMonthState(
+          userId,
+          monthRange.month,
+        ),
+        summary: this.toSummary([]),
+      };
+    }
+
     const categories = await this.categoryModel.find({
-      _id: { $in: budgets.map((budget) => budget.categoryId) },
+      _id: { $in: budget.items.map((item) => item.categoryId) },
     });
     const categoryMap = new Map(
       categories.map((category) => [category.id, category]),
     );
     const usedAmountMap = await this.getUsedAmountMap(userId, monthRange);
-    const items = budgets.map((budget) => {
-      const category = categoryMap.get(budget.categoryId.toString());
-      const usedAmount = usedAmountMap.get(budget.categoryId.toString()) ?? 0;
+    const items = budget.items.map((budgetItem) => {
+      const category = categoryMap.get(budgetItem.categoryId.toString());
+      const usedAmount =
+        usedAmountMap.get(budgetItem.categoryId.toString()) ?? 0;
 
       if (!category) {
         throw new NotFoundException(
@@ -189,35 +227,43 @@ export class BudgetsService {
         );
       }
 
-      return this.toBudgetItemResponse(budget, category, usedAmount);
+      return this.toBudgetItemResponse(
+        budget.id,
+        category,
+        budgetItem.limitAmount,
+        usedAmount,
+      );
     });
-    const summary = this.toSummary(items);
 
     return {
+      documentId: budget.id,
       items,
-      previousMonth: items.length
-        ? undefined
-        : await this.getPreviousMonthState(userId, monthRange.month),
-      summary,
+      month: monthRange.month,
+      previousMonth: undefined,
+      summary: this.toSummary(items),
     };
   }
 
-  private async resolveCategory(userId: string, payload: CreateBudgetDto) {
-    if (payload.categoryId) {
-      return this.findCategoryById(userId, this.toObjectId(payload.categoryId));
-    }
-
-    if (!payload.category) {
-      throw new BadRequestException('Kategori wajib diisi');
-    }
-
-    return this.categoryModel.create({
-      color: payload.category.color,
-      icon: payload.category.icon,
-      name: payload.category.name.trim(),
-      type: CategoryType.Expense,
-      userId: new Types.ObjectId(userId),
-    });
+  private async findOrCreateMonthlyBudget(
+    userId: string,
+    monthRange: MonthRange,
+  ) {
+    return this.budgetModel.findOneAndUpdate(
+      {
+        month: monthRange.month,
+        userId: new Types.ObjectId(userId),
+      },
+      {
+        $setOnInsert: {
+          endsAt: monthRange.end,
+          items: [],
+          month: monthRange.month,
+          startsAt: monthRange.start,
+          userId: new Types.ObjectId(userId),
+        },
+      },
+      { new: true, upsert: true },
+    );
   }
 
   private async findCategoryById(userId: string, categoryId: Types.ObjectId) {
@@ -277,33 +323,33 @@ export class BudgetsService {
 
   private async getPreviousMonthState(userId: string, month: string) {
     const previousMonth = this.getPreviousMonth(month);
-    const previousRange = this.getMonthRange(previousMonth);
-    const previousBudgetCount = await this.budgetModel.countDocuments({
-      isArchived: false,
-      startsAt: { $gte: previousRange.start, $lt: previousRange.end },
+    const previousBudget = await this.budgetModel.findOne({
+      month: previousMonth,
       userId: new Types.ObjectId(userId),
     });
 
     return {
-      available: previousBudgetCount > 0,
+      available: Boolean(previousBudget?.items.length),
       month: previousMonth,
     };
   }
 
   private toBudgetItemResponse(
-    budget: BudgetDocument,
+    documentId: string,
     category: CategoryDocument,
+    limitAmount: number,
     usedAmount: number,
   ): BudgetItemResponse {
-    const percentage = this.getPercentage(usedAmount, budget.limitAmount);
+    const percentage = this.getPercentage(usedAmount, limitAmount);
 
     return {
       categoryId: category.id,
       color: category.color,
+      documentId,
       icon: category.icon,
-      id: budget.id,
-      limitAmount: budget.limitAmount,
-      name: budget.name,
+      id: category.id,
+      limitAmount,
+      name: category.name,
       percentage,
       statusLabel: `${percentage}%`,
       usedAmount,

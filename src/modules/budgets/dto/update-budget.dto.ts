@@ -1,13 +1,12 @@
-import { IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsInt, IsOptional, Matches, Min } from 'class-validator';
 
 export class UpdateBudgetDto {
-  @IsString()
-  @MinLength(2)
-  @IsOptional()
-  name?: string;
-
   @IsInt()
   @Min(1)
   @IsOptional()
   limitAmount?: number;
+
+  @Matches(/^\d{4}-\d{2}$/)
+  @IsOptional()
+  month?: string;
 }

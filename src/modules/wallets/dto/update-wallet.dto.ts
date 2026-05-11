@@ -1,4 +1,14 @@
-import { IsHexColor, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsHexColor,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
+
+import { WalletType } from '../wallet-type.enum';
 
 export class UpdateWalletDto {
   @IsString()
@@ -14,4 +24,13 @@ export class UpdateWalletDto {
   @IsHexColor()
   @IsOptional()
   color?: string;
+
+  @IsEnum(WalletType)
+  @IsOptional()
+  type?: WalletType;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  balance?: number;
 }

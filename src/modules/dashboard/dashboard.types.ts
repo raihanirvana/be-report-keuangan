@@ -4,6 +4,10 @@ export type MoneySummary = {
 };
 
 export type DashboardSummaryResponse = {
+  availablePeriod: {
+    maxMonth: string;
+    minMonth: string;
+  };
   balance: MoneySummary;
   budgetLimit: {
     limitAmount: number;

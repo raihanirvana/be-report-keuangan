@@ -25,20 +25,20 @@ export class Transaction {
   @Prop({ required: true, type: Date })
   occurredAt!: Date;
 
-  @Prop({ default: null, ref: 'Wallet', type: Types.ObjectId })
-  walletId?: Types.ObjectId | null;
+  @Prop({ default: null, trim: true, type: String })
+  walletName?: string | null;
 
   @Prop({ default: null, ref: 'Category', type: Types.ObjectId })
   categoryId?: Types.ObjectId | null;
 
-  @Prop({ default: null, ref: 'Wallet', type: Types.ObjectId })
-  fromWalletId?: Types.ObjectId | null;
+  @Prop({ default: null, trim: true, type: String })
+  fromWalletName?: string | null;
 
-  @Prop({ default: null, ref: 'Wallet', type: Types.ObjectId })
-  toWalletId?: Types.ObjectId | null;
+  @Prop({ default: null, trim: true, type: String })
+  toWalletName?: string | null;
 }
 
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 TransactionSchema.index({ occurredAt: -1, type: 1, userId: 1 });
-TransactionSchema.index({ userId: 1, walletId: 1 });
-TransactionSchema.index({ userId: 1, fromWalletId: 1, toWalletId: 1 });
+TransactionSchema.index({ userId: 1, walletName: 1 });
+TransactionSchema.index({ fromWalletName: 1, toWalletName: 1, userId: 1 });

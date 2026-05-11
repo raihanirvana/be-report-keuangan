@@ -40,9 +40,13 @@ export class AccessTokenGuard implements CanActivate {
     return type === 'Bearer' ? token : undefined;
   }
 
-  private verifyToken(token: string) {
-    return this.jwtService.verifyAsync<JwtPayload>(token, {
-      secret: this.configService.getOrThrow<string>('env.jwt.accessSecret'),
-    });
+  private async verifyToken(token: string) {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token, {
+        secret: this.configService.getOrThrow<string>('env.jwt.accessSecret'),
+      });
+    } catch {
+      throw new UnauthorizedException('Sesi sudah habis');
+    }
   }
 }

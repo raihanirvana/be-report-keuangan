@@ -1,26 +1,26 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
-import { BudgetPeriod } from '../budget-period.enum';
-
 export type BudgetDocument = HydratedDocument<Budget>;
+
+@Schema({ _id: false })
+export class BudgetItem {
+  @Prop({ ref: 'Category', required: true, type: Types.ObjectId })
+  categoryId!: Types.ObjectId;
+
+  @Prop({ min: 1, required: true, type: Number })
+  limitAmount!: number;
+}
+
+const BudgetItemSchema = SchemaFactory.createForClass(BudgetItem);
 
 @Schema({ timestamps: true })
 export class Budget {
   @Prop({ ref: 'User', required: true, type: Types.ObjectId })
   userId!: Types.ObjectId;
 
-  @Prop({ ref: 'Category', required: true, type: Types.ObjectId })
-  categoryId!: Types.ObjectId;
-
   @Prop({ required: true, trim: true })
-  name!: string;
-
-  @Prop({ enum: BudgetPeriod, required: true, type: String })
-  period!: BudgetPeriod;
-
-  @Prop({ min: 1, required: true, type: Number })
-  limitAmount!: number;
+  month!: string;
 
   @Prop({ required: true, type: Date })
   startsAt!: Date;
@@ -28,9 +28,9 @@ export class Budget {
   @Prop({ required: true, type: Date })
   endsAt!: Date;
 
-  @Prop({ default: false })
-  isArchived!: boolean;
+  @Prop({ default: [], type: [BudgetItemSchema] })
+  items!: BudgetItem[];
 }
 
 export const BudgetSchema = SchemaFactory.createForClass(Budget);
-BudgetSchema.index({ categoryId: 1, isArchived: 1, startsAt: 1, userId: 1 });
+BudgetSchema.index({ month: 1, userId: 1 }, { unique: true });

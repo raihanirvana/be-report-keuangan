@@ -8,7 +8,6 @@ type CategorySummary = {
 };
 
 type WalletSummary = {
-  id: string;
   name: string;
 };
 

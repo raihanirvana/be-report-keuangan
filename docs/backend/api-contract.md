@@ -231,6 +231,10 @@ Response `200`:
       "limitAmount": 5000000,
       "percentage": 60
     },
+    "availablePeriod": {
+      "minMonth": "2026-05",
+      "maxMonth": "2026-05"
+    },
     "latestTransactions": [
       {
         "id": "6650f8e9b9f1f1a001234569",
@@ -252,9 +256,14 @@ Response `200`:
 Behavior:
 
 - `latestTransactions` returns at most 4 items.
+- `availablePeriod.minMonth` is based on the user's first transaction month, or
+  the user's creation month when they do not have transactions yet.
+- `availablePeriod.maxMonth` is the current month.
 - `income` and `expense` are calculated from transactions in the selected month.
+  FE should request the current month for the dashboard cards.
 - `balance` is total active wallet balance when `walletId=all`.
-- `budgetLimit` is calculated from monthly budgets. For specific wallet views it currently returns zeroed budget summary.
+- `budgetLimit` is calculated from the monthly budget document. For specific
+  wallet views it currently returns zeroed budget summary.
 
 ## Wallets
 
@@ -320,13 +329,17 @@ Request:
 
 ```json
 {
-  "name": "BCA Saya",
+  "name": "BCA Gaji",
+  "type": "BANK",
+  "icon": "account_balance",
   "color": "#4EA8DE",
-  "icon": "account_balance"
+  "balance": 2450000
 }
 ```
 
-Response `200`: wallet object.
+All fields are optional, but at least one field should be sent.
+
+Response `200`: updated wallet object.
 
 ### DELETE /wallets/:walletId
 
@@ -334,7 +347,13 @@ Auth: required.
 
 Response `204`: empty body.
 
-Behavior: wallet is archived with `isArchived=true`.
+Behavior: wallet document is hard deleted. Existing transaction history keeps a
+snapshot of the wallet label, so history can still show where the transaction
+came from after the wallet is removed.
+
+Validation:
+
+- Active wallet names must be unique per user.
 
 ## Categories
 
@@ -389,6 +408,14 @@ Request:
 
 Response `201`: category object.
 
+Behavior:
+
+- Default categories are global (`userId=null`) and available for all users.
+- Custom categories are stored with the current `userId`, so only that user can
+  see and use them.
+- Transaction and budget limit category choices come from this same category
+  source of truth.
+
 ### PATCH /categories/:categoryId
 
 Auth: required.
@@ -429,7 +456,8 @@ Query params:
 
 - `month`: optional, `YYYY-MM`.
 - `type`: optional, `INCOME`, `EXPENSE`, or `TRANSFER`.
-- `walletId`: optional. Matches `walletId`, `fromWalletId`, or `toWalletId`.
+- `walletId`: optional. Backend translates the active wallet ID to its wallet
+  label, then matches `walletName`, `fromWalletName`, or `toWalletName`.
 - `page`: optional, defaults to `1`.
 - `limit`: optional, defaults to `20`.
 
@@ -447,7 +475,6 @@ Response `200`:
       "note": null,
       "occurredAt": "2024-05-24T14:20:00.000Z",
       "wallet": {
-        "id": "6650f8e9b9f1f1a001234570",
         "name": "BCA"
       },
       "category": {
@@ -509,6 +536,9 @@ Behavior:
 - `EXPENSE` requires `walletId` and `categoryId`.
 - `TRANSFER` requires `fromWalletId` and `toWalletId`.
 - `TRANSFER` source and destination wallet must be different.
+- Wallet IDs are used to validate and update balances when the transaction is
+  created. Transactions store wallet label snapshots only:
+  `walletName`, `fromWalletName`, and `toWalletName`.
 - `INCOME` category must have type `INCOME`.
 - `EXPENSE` category must have type `EXPENSE`.
 - `INCOME` increments wallet balance.
@@ -555,6 +585,8 @@ Response `200`:
 ```json
 {
   "data": {
+    "documentId": "6650f8e9b9f1f1a001234574",
+    "month": "2024-05",
     "summary": {
       "usedAmount": 3000000,
       "limitAmount": 5000000,
@@ -562,7 +594,8 @@ Response `200`:
     },
     "items": [
       {
-        "id": "6650f8e9b9f1f1a001234574",
+        "id": "6650f8e9b9f1f1a001234575",
+        "documentId": "6650f8e9b9f1f1a001234574",
         "name": "Internet/Kuota",
         "categoryId": "6650f8e9b9f1f1a001234575",
         "icon": "wifi",
@@ -586,6 +619,8 @@ Empty state:
 ```json
 {
   "data": {
+    "documentId": null,
+    "month": "2024-05",
     "summary": {
       "usedAmount": 0,
       "limitAmount": 0,
@@ -606,52 +641,39 @@ Empty state:
 
 Behavior:
 
+- Budgets are stored as 1 document per user per month.
+- Each budget item references an existing `EXPENSE` category.
 - `usedAmount` is calculated from `EXPENSE` transactions in the selected month.
-- Budget categories must be `EXPENSE` categories.
+- Transactions do not mutate the budget document. They only affect `usedAmount`
+  because usage is calculated by matching transaction `categoryId`.
+- If a category is not included in the monthly budget document, transactions for
+  that category are still valid and simply do not appear in limit detail.
 - `statusLabel` is always percentage text, including `100%`.
 
 ### POST /budgets
 
 Auth: required.
 
-With existing category:
+Adds or updates one budget item in the monthly budget document.
 
 ```json
 {
-  "name": "Food",
   "categoryId": "6650f8e9b9f1f1a001234571",
-  "period": "MONTHLY",
   "limitAmount": 1500000,
-  "startsAt": "2024-05-01T00:00:00.000Z",
-  "endsAt": "2024-06-01T00:00:00.000Z"
+  "month": "2024-05"
 }
 ```
-
-With new category:
-
-```json
-{
-  "category": {
-    "name": "Transport",
-    "icon": "two_wheeler",
-    "color": "#4EA8DE"
-  },
-  "period": "MONTHLY",
-  "limitAmount": 500000,
-  "startsAt": "2024-05-01T00:00:00.000Z",
-  "endsAt": "2024-06-01T00:00:00.000Z"
-}
-```
-
-Allowed `period`: `MONTHLY`.
 
 Response `201`: budget item object.
 
 Behavior:
 
-- If `category` is provided, backend creates an `EXPENSE` category.
-- If a budget for the same category and same `startsAt` already exists, backend updates that budget.
-- `startsAt` must be earlier than `endsAt`.
+- `month` is optional and defaults to current month.
+- `categoryId` must be an available `EXPENSE` category for the user.
+- If the monthly budget document does not exist, backend creates it.
+- If the category already exists in that month's `items`, backend updates its
+  `limitAmount`.
+- New custom categories are created via `POST /categories`, not via budgets.
 
 ### POST /budgets/copy-previous-month
 
@@ -673,6 +695,8 @@ Response `201`:
 ```json
 {
   "data": {
+    "documentId": "6650f8e9b9f1f1a001234574",
+    "month": "2024-05",
     "summary": {
       "usedAmount": 0,
       "limitAmount": 5000000,
@@ -680,7 +704,8 @@ Response `201`:
     },
     "items": [
       {
-        "id": "6650f8e9b9f1f1a001234576",
+        "id": "6650f8e9b9f1f1a001234571",
+        "documentId": "6650f8e9b9f1f1a001234574",
         "name": "Food",
         "categoryId": "6650f8e9b9f1f1a001234571",
         "icon": "restaurant",
@@ -702,11 +727,14 @@ Response `201`:
 
 Behavior:
 
-- Copies category links, names, period, and `limitAmount`.
+- Copies category links and `limitAmount`.
+- Copies budget `items` from the source monthly document into the target monthly
+  document.
 - Does not copy `usedAmount` or transactions.
-- If target month already has a copied category budget, backend updates its `limitAmount`.
+- If target month already has a budget document, backend replaces its `items`
+  with the previous month's items.
 
-### PATCH /budgets/:budgetId
+### PATCH /budgets/:categoryId
 
 Auth: required.
 
@@ -714,20 +742,28 @@ Request:
 
 ```json
 {
-  "name": "Food",
-  "limitAmount": 2000000
+  "limitAmount": 2000000,
+  "month": "2024-05"
 }
 ```
 
 Response `200`: budget item object.
 
-### DELETE /budgets/:budgetId
+Behavior: updates one item in the monthly budget document. `month` is optional
+and defaults to current month.
+
+### DELETE /budgets/:categoryId
 
 Auth: required.
 
+Query params:
+
+- `month`: optional, `YYYY-MM`. Defaults to current month.
+
 Response `204`: empty body.
 
-Behavior: budget is archived with `isArchived=true`.
+Behavior: removes that category item from the monthly budget document. The
+monthly document remains available for other category limits.
 
 ## Validation Summary
 
@@ -735,9 +771,8 @@ Behavior: budget is archived with `isArchived=true`.
 - `amount` and `limitAmount` must be greater than `0`.
 - `initialBalance` must be at least `0`.
 - `color` must be a hex color string.
-- `occurredAt`, `startsAt`, and `endsAt` must be ISO 8601 strings.
+- `occurredAt` must be an ISO 8601 string.
 - `month`, `sourceMonth`, and `targetMonth` use `YYYY-MM`.
 - `Category.type`: `INCOME`, `EXPENSE`.
 - `Transaction.type`: `INCOME`, `EXPENSE`, `TRANSFER`.
 - `Wallet.type`: `BANK`, `EWALLET`, `CASH`, `SAVINGS`, `OTHER`.
-- `Budget.period`: `MONTHLY`.

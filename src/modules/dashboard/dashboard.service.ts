@@ -45,31 +45,41 @@ export class DashboardService {
     const monthRange = this.getMonthRange(query.month);
     const userObjectId = new Types.ObjectId(userId);
     const selectedWallet = await this.getSelectedWallet(userId, query.walletId);
-    const walletFilter = this.getWalletFilter(selectedWallet.id);
-    const [user, wallets, monthlyTransactions, latestTransactions, budgets] =
-      await Promise.all([
-        this.userModel.findById(userObjectId),
-        this.walletModel.find({ isArchived: false, userId: userObjectId }),
-        this.transactionModel
-          .find({
-            ...walletFilter,
-            occurredAt: { $gte: monthRange.start, $lt: monthRange.end },
-            userId: userObjectId,
-          })
-          .sort({ occurredAt: -1, createdAt: -1 }),
-        this.transactionModel
-          .find({
-            ...walletFilter,
-            userId: userObjectId,
-          })
-          .sort({ occurredAt: -1, createdAt: -1 })
-          .limit(4),
-        this.budgetModel.find({
-          isArchived: false,
-          startsAt: { $gte: monthRange.start, $lt: monthRange.end },
+    const walletFilter = this.getWalletFilter(selectedWallet.name);
+    const [
+      user,
+      wallets,
+      monthlyTransactions,
+      latestTransactions,
+      firstTransaction,
+      budget,
+    ] = await Promise.all([
+      this.userModel.findById(userObjectId),
+      this.walletModel.find({ isArchived: false, userId: userObjectId }),
+      this.transactionModel
+        .find({
+          ...walletFilter,
+          occurredAt: { $gte: monthRange.start, $lt: monthRange.end },
           userId: userObjectId,
-        }),
-      ]);
+        })
+        .sort({ occurredAt: -1, createdAt: -1 }),
+      this.transactionModel
+        .find({
+          ...walletFilter,
+          userId: userObjectId,
+        })
+        .sort({ occurredAt: -1, createdAt: -1 })
+        .limit(4),
+      this.transactionModel
+        .findOne({
+          userId: userObjectId,
+        })
+        .sort({ occurredAt: 1, createdAt: 1 }),
+      this.budgetModel.findOne({
+        month: monthRange.month,
+        userId: userObjectId,
+      }),
+    ]);
 
     if (!user) {
       throw new NotFoundException('User tidak ditemukan');
@@ -93,12 +103,13 @@ export class DashboardService {
     const chartCategories = await this.getChartCategories(expenseTransactions);
     const budgetLimit = await this.getBudgetLimit(
       userId,
-      budgets,
+      budget,
       monthRange,
       selectedWallet.id,
     );
 
     return {
+      availablePeriod: this.getAvailablePeriod(user, firstTransaction),
       balance: {
         amount: balanceAmount,
         formatted: this.formatRupiah(balanceAmount),
@@ -165,18 +176,16 @@ export class DashboardService {
     };
   }
 
-  private getWalletFilter(walletId: string) {
-    if (walletId === 'all') {
+  private getWalletFilter(walletName: string) {
+    if (walletName === 'Total Asset Saya') {
       return {};
     }
 
-    const walletObjectId = new Types.ObjectId(walletId);
-
     return {
       $or: [
-        { walletId: walletObjectId },
-        { fromWalletId: walletObjectId },
-        { toWalletId: walletObjectId },
+        { walletName },
+        { fromWalletName: walletName },
+        { toWalletName: walletName },
       ],
     };
   }
@@ -219,17 +228,20 @@ export class DashboardService {
 
   private async getBudgetLimit(
     userId: string,
-    budgets: BudgetDocument[],
+    budget: BudgetDocument | null,
     monthRange: MonthRange,
     selectedWalletId: string,
   ) {
     const usedAmount =
       selectedWalletId === 'all'
-        ? await this.getBudgetUsedAmount(userId, budgets, monthRange)
+        ? await this.getBudgetUsedAmount(userId, budget, monthRange)
         : 0;
     const limitAmount =
       selectedWalletId === 'all'
-        ? budgets.reduce((total, budget) => total + budget.limitAmount, 0)
+        ? (budget?.items ?? []).reduce(
+            (total, item) => total + item.limitAmount,
+            0,
+          )
         : 0;
 
     return {
@@ -241,10 +253,12 @@ export class DashboardService {
 
   private async getBudgetUsedAmount(
     userId: string,
-    budgets: BudgetDocument[],
+    budget: BudgetDocument | null,
     monthRange: MonthRange,
   ) {
-    const budgetCategoryIds = budgets.map((budget) => budget.categoryId);
+    const budgetCategoryIds = (budget?.items ?? []).map(
+      (item) => item.categoryId,
+    );
 
     if (!budgetCategoryIds.length) {
       return 0;
@@ -315,5 +329,21 @@ export class DashboardService {
       month: normalizedMonth,
       start: new Date(Date.UTC(year, monthNumber - 1, 1)),
     };
+  }
+
+  private getAvailablePeriod(
+    user: UserDocument,
+    firstTransaction: TransactionDocument | null,
+  ) {
+    return {
+      maxMonth: this.formatMonth(new Date()),
+      minMonth: this.formatMonth(
+        firstTransaction?.occurredAt ?? user.createdAt,
+      ),
+    };
+  }
+
+  private formatMonth(date: Date) {
+    return date.toISOString().slice(0, 7);
   }
 }
