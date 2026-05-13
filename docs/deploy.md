@@ -1,21 +1,28 @@
 # Deploy Backend
 
-Backend ini paling mudah dideploy ke Railway.
+Backend ini sekarang paling enak dideploy ke Render.
 
-## Kenapa Railway
+## Kenapa Render
 
-- Railway bisa deploy langsung dari GitHub atau CLI.
-- Repo ini sudah disiapkan dengan `Dockerfile` dan `railway.json`.
-- Healthcheck sudah diarahkan ke `/v1/health`.
+- Setup paling cepat untuk NestJS biasa.
+- Bisa deploy langsung dari GitHub.
+- Repo ini sudah disiapkan dengan `render.yaml`.
+- Health check sudah diarahkan ke `/v1/health`.
+- Cocok untuk hobby app dan testing production-like.
+
+Catatan:
+
+- Free web service di Render akan sleep setelah sekitar 15 menit idle.
+- Request pertama setelah sleep bisa kena cold start beberapa detik sampai sekitar 1 menit.
 
 Sumber resmi:
-- Railway config as code: https://docs.railway.com/config-as-code
-- Railway healthchecks: https://docs.railway.com/reference/healthchecks
-- Railway build and start commands: https://docs.railway.com/reference/build-and-start-commands
+- Render Blueprint spec: https://render.com/docs/blueprint-spec
+- Render free services: https://render.com/free
+- Render pricing: https://render.com/pricing
 
 ## Environment variables
 
-Isi variable berikut di Railway service:
+Isi variable berikut di Render service:
 
 - `APP_NAME`
 - `PORT`
@@ -27,56 +34,72 @@ Isi variable berikut di Railway service:
 
 Contoh awal ada di `.env.example`.
 
+## File yang sudah disiapkan
+
+- `render.yaml` untuk konfigurasi service Render
+- `Dockerfile` kalau nanti mau pindah ke platform lain
+- `railway.json` tetap dibiarkan untuk fallback
+
 ## Deploy via GitHub
 
 1. Push repo ini ke GitHub.
-2. Buat project baru di Railway.
-3. Pilih `Deploy from GitHub repo`.
-4. Pilih repo `be-keuangan`.
-5. Tambahkan semua environment variables.
-6. Railway akan membaca `railway.json` dan `Dockerfile` otomatis.
-7. Setelah deploy selesai, cek:
+2. Buka Render.
+3. Klik `New` -> `Blueprint`.
+4. Connect GitHub repo `be-keuangan`.
+5. Render akan membaca `render.yaml` otomatis.
+6. Isi env yang masih `sync: false`:
+   - `MONGODB_URI`
+   - `JWT_ACCESS_SECRET`
+   - `JWT_REFRESH_SECRET`
+7. Deploy.
+8. Setelah live, cek health:
 
 ```bash
-curl https://<domain-railway>/v1/health
+curl https://<domain-render>/v1/health
 ```
 
-## Deploy via Railway CLI
+## Kalau mau setup manual tanpa Blueprint
 
-Install CLI:
+1. Buka Render.
+2. Klik `New` -> `Web Service`.
+3. Pilih repo `be-keuangan`.
+4. Isi konfigurasi berikut:
 
-```bash
-npm i -g @railway/cli
+```text
+Environment: Node
+Build Command: npm ci && npm run build
+Start Command: npm run start:prod
 ```
 
-Login dan deploy:
+5. Tambahkan health check path:
 
-```bash
-railway login
-railway link
-railway up
+```text
+/v1/health
 ```
+
+6. Isi semua environment variables.
 
 ## URL frontend
 
-Set `API_BASE_URL` di frontend ke domain Railway kamu, misalnya:
+Set `API_BASE_URL` di frontend ke domain Render kamu.
+
+Kalau constant frontend kamu belum menambahkan `/v1`, pakai:
 
 ```text
-https://be-keuangan-production.up.railway.app/v1
+https://<domain-render>/v1
 ```
 
-atau kalau constant frontend kamu memang menambahkan `/v1` sendiri, pakai base domain tanpa suffix itu.
+Kalau constant frontend kamu sudah menambahkan `/v1` sendiri, pakai base domain saja:
+
+```text
+https://<domain-render>
+```
 
 ## Alternatif
 
-Karena repo ini sudah punya `Dockerfile`, kamu juga bisa deploy ke:
+Kalau nanti mau pindah dari Render, repo ini juga masih siap untuk:
 
-- Render
+- Railway
 - Fly.io
 - VPS sendiri dengan Docker
-
-Command container-nya tetap sama:
-
-```bash
-npm run start:prod
-```
+- Google Cloud Run
