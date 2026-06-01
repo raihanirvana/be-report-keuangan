@@ -10,6 +10,7 @@ import {
   Transaction,
   TransactionSchema,
 } from '../transactions/schemas/transaction.schema';
+import { PeriodsModule } from '../periods/periods.module';
 import { BudgetsController } from './budgets.controller';
 import { BudgetsService } from './budgets.service';
 import { Budget, BudgetSchema } from './schemas/budget.schema';
@@ -18,6 +19,7 @@ import { Budget, BudgetSchema } from './schemas/budget.schema';
   controllers: [BudgetsController],
   imports: [
     AuthModule,
+    PeriodsModule,
     MongooseModule.forFeature([
       {
         name: Budget.name,

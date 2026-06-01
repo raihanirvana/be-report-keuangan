@@ -6,6 +6,7 @@ import {
   Category,
   CategorySchema,
 } from '../categories/schemas/category.schema';
+import { PeriodsModule } from '../periods/periods.module';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
 import { Transaction, TransactionSchema } from './schemas/transaction.schema';
 import { TransactionsController } from './transactions.controller';
@@ -15,6 +16,7 @@ import { TransactionsService } from './transactions.service';
   controllers: [TransactionsController],
   imports: [
     AuthModule,
+    PeriodsModule,
     MongooseModule.forFeature([
       {
         name: Transaction.name,

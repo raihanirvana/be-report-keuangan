@@ -13,6 +13,7 @@ import {
 } from '../transactions/schemas/transaction.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
+import { PeriodsModule } from '../periods/periods.module';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 
@@ -20,6 +21,7 @@ import { DashboardService } from './dashboard.service';
   controllers: [DashboardController],
   imports: [
     AuthModule,
+    PeriodsModule,
     MongooseModule.forFeature([
       {
         name: User.name,

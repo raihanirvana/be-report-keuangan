@@ -21,9 +21,16 @@ export type BudgetsResponse = {
   documentId: string | null;
   items: BudgetItemResponse[];
   month: string;
+  period?: {
+    endDate: string;
+    id: string | null;
+    label: string;
+    startDate: string;
+  };
   previousMonth?: {
     available: boolean;
     month: string;
+    periodId?: string;
   };
   summary: BudgetSummaryResponse;
 };

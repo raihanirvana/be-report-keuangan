@@ -172,6 +172,70 @@ Response `200`:
 }
 ```
 
+## Payroll Periods
+
+Payroll periods are optional custom ranges for users who do not track finance by
+calendar month. Existing `month=YYYY-MM` queries remain supported for backward
+compatibility.
+
+### GET /periods
+
+Auth: required.
+
+Response `200`:
+
+```json
+{
+  "data": [
+    {
+      "id": "6650f8e9b9f1f1a001234580",
+      "name": "Gajian Juni",
+      "label": "29 Mei 2026 - 29 Jun 2026",
+      "startDate": "2026-05-29T00:00:00.000Z",
+      "endDate": "2026-06-29T00:00:00.000Z",
+      "isCurrent": true
+    }
+  ],
+  "meta": {},
+  "error": null
+}
+```
+
+Behavior: if the user has no custom periods yet, backend creates a default
+period for the current calendar month so existing users can continue normally.
+
+### POST /periods
+
+Auth: required.
+
+Request:
+
+```json
+{
+  "name": "Gajian Juni",
+  "startDate": "2026-05-29",
+  "endDate": "2026-06-29"
+}
+```
+
+Response `201`: period object.
+
+### PATCH /periods/:periodId
+
+Auth: required.
+
+Request: same fields as `POST /periods`, all optional.
+
+Response `200`: period object.
+
+### DELETE /periods/:periodId
+
+Auth: required.
+
+Response `204`: empty body.
+
+Behavior: period is archived. Transactions remain untouched.
+
 ## Dashboard
 
 ### GET /dashboard/summary
@@ -181,12 +245,15 @@ Auth: required.
 Query:
 
 ```text
-month=2024-05&walletId=all
+month=2024-05&periodId=6650f8e9b9f1f1a001234580&walletId=all
 ```
 
 Query params:
 
 - `month`: optional, `YYYY-MM`. Defaults to current month.
+- `periodId`: optional. When present, `income`, `expense`, `chart`, and
+  `budgetLimit` use that custom payroll period range. `month` stays supported
+  as fallback for legacy calendar-month views.
 - `walletId`: optional. Use `all` or omit for total assets.
 
 Response `200`:
@@ -235,6 +302,12 @@ Response `200`:
       "minMonth": "2026-05",
       "maxMonth": "2026-05"
     },
+    "activePeriod": {
+      "id": "6650f8e9b9f1f1a001234580",
+      "label": "29 Mei 2026 - 29 Jun 2026",
+      "startDate": "2026-05-29T00:00:00.000Z",
+      "endDate": "2026-06-29T00:00:00.000Z"
+    },
     "latestTransactions": [
       {
         "id": "6650f8e9b9f1f1a001234569",
@@ -247,7 +320,8 @@ Response `200`:
     ]
   },
   "meta": {
-    "month": "2024-05"
+    "month": "2024-05",
+    "periodId": "6650f8e9b9f1f1a001234580"
   },
   "error": null
 }
@@ -259,8 +333,8 @@ Behavior:
 - `availablePeriod.minMonth` is based on the user's first transaction month, or
   the user's creation month when they do not have transactions yet.
 - `availablePeriod.maxMonth` is the current month.
-- `income` and `expense` are calculated from transactions in the selected month.
-  FE should request the current month for the dashboard cards.
+- `income` and `expense` are calculated from transactions in `periodId` range
+  when provided, otherwise from the selected calendar month.
 - `balance` is total active wallet balance when `walletId=all`.
 - `budgetLimit` is calculated from the monthly budget document. For specific
   wallet views it currently returns zeroed budget summary.
@@ -449,12 +523,14 @@ Auth: required.
 Query:
 
 ```text
-month=2024-05&type=EXPENSE&walletId=6650f8e9b9f1f1a001234570&page=1&limit=20
+month=2024-05&periodId=6650f8e9b9f1f1a001234580&type=EXPENSE&walletId=6650f8e9b9f1f1a001234570&page=1&limit=20
 ```
 
 Query params:
 
 - `month`: optional, `YYYY-MM`.
+- `periodId`: optional. When present, transaction date filtering uses the
+  custom payroll period range instead of calendar month.
 - `type`: optional, `INCOME`, `EXPENSE`, or `TRANSFER`.
 - `walletId`: optional. Backend translates the active wallet ID to its wallet
   label, then matches `walletName`, `fromWalletName`, or `toWalletName`.
@@ -573,12 +649,14 @@ Auth: required.
 Query:
 
 ```text
-month=2024-05
+month=2024-05&periodId=6650f8e9b9f1f1a001234580
 ```
 
 Query params:
 
 - `month`: optional, `YYYY-MM`. Defaults to current month.
+- `periodId`: optional. When present, backend stores/loads the budget document
+  with internal key `period:<periodId>` and calculates usage from that range.
 
 Response `200`:
 
@@ -629,7 +707,14 @@ Empty state:
     "items": [],
     "previousMonth": {
       "month": "2024-04",
+      "periodId": "6650f8e9b9f1f1a001234579",
       "available": true
+    },
+    "period": {
+      "id": "6650f8e9b9f1f1a001234580",
+      "label": "29 Mei 2026 - 29 Jun 2026",
+      "startDate": "2026-05-29T00:00:00.000Z",
+      "endDate": "2026-06-29T00:00:00.000Z"
     }
   },
   "meta": {
@@ -641,9 +726,11 @@ Empty state:
 
 Behavior:
 
-- Budgets are stored as 1 document per user per month.
+- Budgets are stored as 1 document per user per calendar month or custom
+  payroll period.
 - Each budget item references an existing `EXPENSE` category.
-- `usedAmount` is calculated from `EXPENSE` transactions in the selected month.
+- `usedAmount` is calculated from `EXPENSE` transactions in the selected month
+  or custom payroll period.
 - Transactions do not mutate the budget document. They only affect `usedAmount`
   because usage is calculated by matching transaction `categoryId`.
 - If a category is not included in the monthly budget document, transactions for
@@ -660,7 +747,8 @@ Adds or updates one budget item in the monthly budget document.
 {
   "categoryId": "6650f8e9b9f1f1a001234571",
   "limitAmount": 1500000,
-  "month": "2024-05"
+  "month": "2024-05",
+  "periodId": "6650f8e9b9f1f1a001234580"
 }
 ```
 
@@ -669,6 +757,7 @@ Response `201`: budget item object.
 Behavior:
 
 - `month` is optional and defaults to current month.
+- `periodId` is optional and takes precedence over `month`.
 - `categoryId` must be an available `EXPENSE` category for the user.
 - If the monthly budget document does not exist, backend creates it.
 - If the category already exists in that month's `items`, backend updates its
@@ -686,7 +775,9 @@ Request:
 ```json
 {
   "sourceMonth": "2024-04",
-  "targetMonth": "2024-05"
+  "targetMonth": "2024-05",
+  "sourcePeriodId": "6650f8e9b9f1f1a001234579",
+  "targetPeriodId": "6650f8e9b9f1f1a001234580"
 }
 ```
 
@@ -719,7 +810,9 @@ Response `201`:
   },
   "meta": {
     "sourceMonth": "2024-04",
-    "targetMonth": "2024-05"
+    "targetMonth": "2024-05",
+    "sourcePeriodId": "6650f8e9b9f1f1a001234579",
+    "targetPeriodId": "6650f8e9b9f1f1a001234580"
   },
   "error": null
 }
@@ -728,8 +821,7 @@ Response `201`:
 Behavior:
 
 - Copies category links and `limitAmount`.
-- Copies budget `items` from the source monthly document into the target monthly
-  document.
+- Copies budget `items` from the source document into the target document.
 - Does not copy `usedAmount` or transactions.
 - If target month already has a budget document, backend replaces its `items`
   with the previous month's items.
@@ -743,14 +835,15 @@ Request:
 ```json
 {
   "limitAmount": 2000000,
-  "month": "2024-05"
+  "month": "2024-05",
+  "periodId": "6650f8e9b9f1f1a001234580"
 }
 ```
 
 Response `200`: budget item object.
 
-Behavior: updates one item in the monthly budget document. `month` is optional
-and defaults to current month.
+Behavior: updates one item in the budget document. `periodId` is optional and
+takes precedence over `month`.
 
 ### DELETE /budgets/:categoryId
 
@@ -759,6 +852,7 @@ Auth: required.
 Query params:
 
 - `month`: optional, `YYYY-MM`. Defaults to current month.
+- `periodId`: optional. Takes precedence over `month`.
 
 Response `204`: empty body.
 
@@ -773,6 +867,7 @@ monthly document remains available for other category limits.
 - `color` must be a hex color string.
 - `occurredAt` must be an ISO 8601 string.
 - `month`, `sourceMonth`, and `targetMonth` use `YYYY-MM`.
+- `periodId`, `sourcePeriodId`, and `targetPeriodId` use MongoDB ObjectId.
 - `Category.type`: `INCOME`, `EXPENSE`.
 - `Transaction.type`: `INCOME`, `EXPENSE`, `TRANSFER`.
 - `Wallet.type`: `BANK`, `EWALLET`, `CASH`, `SAVINGS`, `OTHER`.

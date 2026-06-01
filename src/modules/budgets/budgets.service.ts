@@ -16,6 +16,8 @@ import {
   TransactionDocument,
 } from '../transactions/schemas/transaction.schema';
 import { TransactionType } from '../transactions/transaction-type.enum';
+import { PeriodsService } from '../periods/periods.service';
+import type { PeriodRange } from '../periods/periods.types';
 import {
   BudgetItemResponse,
   BudgetsResponse,
@@ -27,12 +29,6 @@ import { FindBudgetsQueryDto } from './dto/find-budgets-query.dto';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
 import { Budget, BudgetDocument } from './schemas/budget.schema';
 
-type MonthRange = {
-  end: Date;
-  month: string;
-  start: Date;
-};
-
 @Injectable()
 export class BudgetsService {
   constructor(
@@ -42,24 +38,25 @@ export class BudgetsService {
     private readonly categoryModel: Model<CategoryDocument>,
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
+    private readonly periodsService: PeriodsService,
   ) {}
 
   async findAll(
     userId: string,
     query: FindBudgetsQueryDto,
   ): Promise<BudgetsResponse> {
-    const monthRange = this.getMonthRange(query.month);
+    const periodRange = await this.periodsService.resolveRange(userId, query);
 
-    return this.getBudgetSummary(userId, monthRange);
+    return this.getBudgetSummary(userId, periodRange);
   }
 
   async create(userId: string, payload: CreateBudgetDto) {
-    const monthRange = this.getMonthRange(payload.month);
+    const periodRange = await this.periodsService.resolveRange(userId, payload);
     const category = await this.findCategoryById(
       userId,
       this.toObjectId(payload.categoryId),
     );
-    const budget = await this.findOrCreateMonthlyBudget(userId, monthRange);
+    const budget = await this.findOrCreatePeriodBudget(userId, periodRange);
     const existingItem = budget.items.find((item) =>
       item.categoryId.equals(category._id),
     );
@@ -82,17 +79,23 @@ export class BudgetsService {
       await this.getUsedAmountByCategory(
         userId,
         category._id,
-        monthRange.start,
-        monthRange.end,
+        periodRange.start,
+        periodRange.end,
       ),
     );
   }
 
   async copyPreviousMonth(userId: string, payload: CopyPreviousMonthDto) {
-    const sourceRange = this.getMonthRange(payload.sourceMonth);
-    const targetRange = this.getMonthRange(payload.targetMonth);
+    const sourceRange = await this.periodsService.resolveRange(userId, {
+      month: payload.sourceMonth,
+      periodId: payload.sourcePeriodId,
+    });
+    const targetRange = await this.periodsService.resolveRange(userId, {
+      month: payload.targetMonth,
+      periodId: payload.targetPeriodId,
+    });
     const sourceBudget = await this.budgetModel.findOne({
-      month: sourceRange.month,
+      month: sourceRange.budgetKey,
       userId: new Types.ObjectId(userId),
     });
 
@@ -102,7 +105,7 @@ export class BudgetsService {
 
     await this.budgetModel.findOneAndUpdate(
       {
-        month: targetRange.month,
+        month: targetRange.budgetKey,
         userId: new Types.ObjectId(userId),
       },
       {
@@ -111,7 +114,7 @@ export class BudgetsService {
           categoryId: item.categoryId,
           limitAmount: item.limitAmount,
         })),
-        month: targetRange.month,
+        month: targetRange.budgetKey,
         startsAt: targetRange.start,
         userId: new Types.ObjectId(userId),
       },
@@ -122,10 +125,10 @@ export class BudgetsService {
   }
 
   async update(userId: string, budgetId: string, payload: UpdateBudgetDto) {
-    const monthRange = this.getMonthRange(payload.month);
+    const periodRange = await this.periodsService.resolveRange(userId, payload);
     const categoryId = this.toObjectId(budgetId);
     const budget = await this.budgetModel.findOne({
-      month: monthRange.month,
+      month: periodRange.budgetKey,
       userId: new Types.ObjectId(userId),
     });
 
@@ -151,8 +154,8 @@ export class BudgetsService {
     const usedAmount = await this.getUsedAmountByCategory(
       userId,
       categoryId,
-      monthRange.start,
-      monthRange.end,
+      periodRange.start,
+      periodRange.end,
     );
 
     return this.toBudgetItemResponse(
@@ -163,11 +166,11 @@ export class BudgetsService {
     );
   }
 
-  async remove(userId: string, budgetId: string, month?: string) {
-    const monthRange = this.getMonthRange(month);
+  async remove(userId: string, budgetId: string, query: FindBudgetsQueryDto) {
+    const periodRange = await this.periodsService.resolveRange(userId, query);
     const categoryId = this.toObjectId(budgetId);
     const budget = await this.budgetModel.findOne({
-      month: monthRange.month,
+      month: periodRange.budgetKey,
       userId: new Types.ObjectId(userId),
     });
 
@@ -189,10 +192,10 @@ export class BudgetsService {
 
   private async getBudgetSummary(
     userId: string,
-    monthRange: MonthRange,
+    periodRange: PeriodRange,
   ): Promise<BudgetsResponse> {
     const budget = await this.budgetModel.findOne({
-      month: monthRange.month,
+      month: periodRange.budgetKey,
       userId: new Types.ObjectId(userId),
     });
 
@@ -200,11 +203,9 @@ export class BudgetsService {
       return {
         documentId: budget?.id ?? null,
         items: [],
-        month: monthRange.month,
-        previousMonth: await this.getPreviousMonthState(
-          userId,
-          monthRange.month,
-        ),
+        month: periodRange.month ?? periodRange.budgetKey,
+        period: this.toPeriodMeta(periodRange),
+        previousMonth: await this.getPreviousPeriodState(userId, periodRange),
         summary: this.toSummary([]),
       };
     }
@@ -215,7 +216,7 @@ export class BudgetsService {
     const categoryMap = new Map(
       categories.map((category) => [category.id, category]),
     );
-    const usedAmountMap = await this.getUsedAmountMap(userId, monthRange);
+    const usedAmountMap = await this.getUsedAmountMap(userId, periodRange);
     const items = budget.items.map((budgetItem) => {
       const category = categoryMap.get(budgetItem.categoryId.toString());
       const usedAmount =
@@ -238,27 +239,28 @@ export class BudgetsService {
     return {
       documentId: budget.id,
       items,
-      month: monthRange.month,
+      month: periodRange.month ?? periodRange.budgetKey,
+      period: this.toPeriodMeta(periodRange),
       previousMonth: undefined,
       summary: this.toSummary(items),
     };
   }
 
-  private async findOrCreateMonthlyBudget(
+  private async findOrCreatePeriodBudget(
     userId: string,
-    monthRange: MonthRange,
+    periodRange: PeriodRange,
   ) {
     return this.budgetModel.findOneAndUpdate(
       {
-        month: monthRange.month,
+        month: periodRange.budgetKey,
         userId: new Types.ObjectId(userId),
       },
       {
         $setOnInsert: {
-          endsAt: monthRange.end,
+          endsAt: periodRange.end,
           items: [],
-          month: monthRange.month,
-          startsAt: monthRange.start,
+          month: periodRange.budgetKey,
+          startsAt: periodRange.start,
           userId: new Types.ObjectId(userId),
         },
       },
@@ -300,9 +302,9 @@ export class BudgetsService {
     );
   }
 
-  private async getUsedAmountMap(userId: string, monthRange: MonthRange) {
+  private async getUsedAmountMap(userId: string, periodRange: PeriodRange) {
     const transactions = await this.transactionModel.find({
-      occurredAt: { $gte: monthRange.start, $lt: monthRange.end },
+      occurredAt: { $gte: periodRange.start, $lt: periodRange.end },
       type: TransactionType.Expense,
       userId: new Types.ObjectId(userId),
     });
@@ -321,8 +323,30 @@ export class BudgetsService {
     return usedAmountMap;
   }
 
-  private async getPreviousMonthState(userId: string, month: string) {
-    const previousMonth = this.getPreviousMonth(month);
+  private async getPreviousPeriodState(
+    userId: string,
+    periodRange: PeriodRange,
+  ) {
+    if (periodRange.periodId) {
+      const previousPeriod = await this.periodsService.getPreviousPeriodState(
+        userId,
+        periodRange,
+      );
+      const previousBudget = previousPeriod.periodId
+        ? await this.budgetModel.findOne({
+            month: previousPeriod.budgetKey,
+            userId: new Types.ObjectId(userId),
+          })
+        : null;
+
+      return {
+        available: Boolean(previousBudget?.items.length),
+        month: previousPeriod.periodId ?? '',
+        periodId: previousPeriod.periodId,
+      };
+    }
+
+    const previousMonth = this.getPreviousMonth(periodRange.month ?? '');
     const previousBudget = await this.budgetModel.findOne({
       month: previousMonth,
       userId: new Types.ObjectId(userId),
@@ -381,23 +405,6 @@ export class BudgetsService {
     return Math.min(100, Math.round((usedAmount / limitAmount) * 100));
   }
 
-  private getMonthRange(month?: string): MonthRange {
-    const normalizedMonth = month ?? this.getCurrentMonth();
-    const [year, monthNumber] = normalizedMonth.split('-').map(Number);
-    const start = new Date(Date.UTC(year, monthNumber - 1, 1));
-    const end = new Date(Date.UTC(year, monthNumber, 1));
-
-    return {
-      end,
-      month: normalizedMonth,
-      start,
-    };
-  }
-
-  private getCurrentMonth() {
-    return new Date().toISOString().slice(0, 7);
-  }
-
   private getPreviousMonth(month: string) {
     const [year, monthNumber] = month.split('-').map(Number);
     const date = new Date(Date.UTC(year, monthNumber - 2, 1));
@@ -411,5 +418,14 @@ export class BudgetsService {
     }
 
     return new Types.ObjectId(id);
+  }
+
+  private toPeriodMeta(periodRange: PeriodRange) {
+    return {
+      endDate: periodRange.end.toISOString(),
+      id: periodRange.periodId ?? null,
+      label: periodRange.label,
+      startDate: periodRange.start.toISOString(),
+    };
   }
 }

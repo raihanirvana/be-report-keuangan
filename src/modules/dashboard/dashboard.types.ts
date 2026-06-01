@@ -8,6 +8,12 @@ export type DashboardSummaryResponse = {
     maxMonth: string;
     minMonth: string;
   };
+  activePeriod: {
+    endDate: string;
+    id: string | null;
+    label: string;
+    startDate: string;
+  };
   balance: MoneySummary;
   budgetLimit: {
     limitAmount: number;

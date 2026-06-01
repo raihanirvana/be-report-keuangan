@@ -11,6 +11,7 @@ import {
   CategoryDocument,
 } from '../categories/schemas/category.schema';
 import { CategoryType } from '../categories/category-type.enum';
+import { PeriodsService } from '../periods/periods.service';
 import { Wallet, WalletDocument } from '../wallets/schemas/wallet.schema';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { FindTransactionsQueryDto } from './dto/find-transactions-query.dto';
@@ -63,6 +64,7 @@ export class TransactionsService {
     private readonly walletModel: Model<WalletDocument>,
     @InjectModel(Category.name)
     private readonly categoryModel: Model<CategoryDocument>,
+    private readonly periodsService: PeriodsService,
   ) {}
 
   async findAll(
@@ -395,11 +397,9 @@ export class TransactionsService {
       ...(query.type ? { type: query.type } : {}),
     };
 
-    if (query.month) {
-      const [year, month] = query.month.split('-').map(Number);
-      const start = new Date(Date.UTC(year, month - 1, 1));
-      const end = new Date(Date.UTC(year, month, 1));
-      filter.occurredAt = { $gte: start, $lt: end };
+    if (query.month || query.periodId) {
+      const range = await this.periodsService.resolveRange(userId, query);
+      filter.occurredAt = { $gte: range.start, $lt: range.end };
     }
 
     if (query.walletId) {

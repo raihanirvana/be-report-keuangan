@@ -34,7 +34,10 @@ export class BudgetsController {
   ) {
     const result = await this.budgetsService.findAll(user.sub, query);
 
-    return envelope(result, { month: query.month });
+    return envelope(result, {
+      month: query.month,
+      periodId: query.periodId,
+    });
   }
 
   @Post()
@@ -51,7 +54,9 @@ export class BudgetsController {
       await this.budgetsService.copyPreviousMonth(user.sub, body),
       {
         sourceMonth: body.sourceMonth,
+        sourcePeriodId: body.sourcePeriodId,
         targetMonth: body.targetMonth,
+        targetPeriodId: body.targetPeriodId,
       },
     );
   }
@@ -72,6 +77,6 @@ export class BudgetsController {
     @Param('budgetId') budgetId: string,
     @Query() query: FindBudgetsQueryDto,
   ) {
-    await this.budgetsService.remove(user.sub, budgetId, query.month);
+    await this.budgetsService.remove(user.sub, budgetId, query);
   }
 }

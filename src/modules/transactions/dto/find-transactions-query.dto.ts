@@ -15,6 +15,10 @@ export class FindTransactionsQueryDto {
   @IsOptional()
   month?: string;
 
+  @IsMongoId()
+  @IsOptional()
+  periodId?: string;
+
   @IsEnum(TransactionType)
   @IsOptional()
   type?: TransactionType;

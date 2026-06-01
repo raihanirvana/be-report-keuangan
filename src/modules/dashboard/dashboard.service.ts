@@ -14,14 +14,10 @@ import {
 import { TransactionType } from '../transactions/transaction-type.enum';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { Wallet, WalletDocument } from '../wallets/schemas/wallet.schema';
+import { PeriodsService } from '../periods/periods.service';
+import type { PeriodRange } from '../periods/periods.types';
 import { DashboardSummaryQueryDto } from './dto/dashboard-summary-query.dto';
 import { DashboardSummaryResponse } from './dashboard.types';
-
-type MonthRange = {
-  end: Date;
-  month: string;
-  start: Date;
-};
 
 @Injectable()
 export class DashboardService {
@@ -36,13 +32,14 @@ export class DashboardService {
     private readonly categoryModel: Model<CategoryDocument>,
     @InjectModel(Budget.name)
     private readonly budgetModel: Model<BudgetDocument>,
+    private readonly periodsService: PeriodsService,
   ) {}
 
   async getSummary(
     userId: string,
     query: DashboardSummaryQueryDto,
   ): Promise<DashboardSummaryResponse> {
-    const monthRange = this.getMonthRange(query.month);
+    const periodRange = await this.periodsService.resolveRange(userId, query);
     const userObjectId = new Types.ObjectId(userId);
     const selectedWallet = await this.getSelectedWallet(userId, query.walletId);
     const walletFilter = this.getWalletFilter(selectedWallet.name);
@@ -59,7 +56,7 @@ export class DashboardService {
       this.transactionModel
         .find({
           ...walletFilter,
-          occurredAt: { $gte: monthRange.start, $lt: monthRange.end },
+          occurredAt: { $gte: periodRange.start, $lt: periodRange.end },
           userId: userObjectId,
         })
         .sort({ occurredAt: -1, createdAt: -1 }),
@@ -76,7 +73,7 @@ export class DashboardService {
         })
         .sort({ occurredAt: 1, createdAt: 1 }),
       this.budgetModel.findOne({
-        month: monthRange.month,
+        month: periodRange.budgetKey,
         userId: userObjectId,
       }),
     ]);
@@ -104,11 +101,17 @@ export class DashboardService {
     const budgetLimit = await this.getBudgetLimit(
       userId,
       budget,
-      monthRange,
+      periodRange,
       selectedWallet.id,
     );
 
     return {
+      activePeriod: {
+        endDate: periodRange.end.toISOString(),
+        id: periodRange.periodId ?? null,
+        label: periodRange.label,
+        startDate: periodRange.start.toISOString(),
+      },
       availablePeriod: this.getAvailablePeriod(user, firstTransaction),
       balance: {
         amount: balanceAmount,
@@ -229,12 +232,12 @@ export class DashboardService {
   private async getBudgetLimit(
     userId: string,
     budget: BudgetDocument | null,
-    monthRange: MonthRange,
+    periodRange: PeriodRange,
     selectedWalletId: string,
   ) {
     const usedAmount =
       selectedWalletId === 'all'
-        ? await this.getBudgetUsedAmount(userId, budget, monthRange)
+        ? await this.getBudgetUsedAmount(userId, budget, periodRange)
         : 0;
     const limitAmount =
       selectedWalletId === 'all'
@@ -254,7 +257,7 @@ export class DashboardService {
   private async getBudgetUsedAmount(
     userId: string,
     budget: BudgetDocument | null,
-    monthRange: MonthRange,
+    periodRange: PeriodRange,
   ) {
     const budgetCategoryIds = (budget?.items ?? []).map(
       (item) => item.categoryId,
@@ -266,7 +269,7 @@ export class DashboardService {
 
     const transactions = await this.transactionModel.find({
       categoryId: { $in: budgetCategoryIds },
-      occurredAt: { $gte: monthRange.start, $lt: monthRange.end },
+      occurredAt: { $gte: periodRange.start, $lt: periodRange.end },
       type: TransactionType.Expense,
       userId: new Types.ObjectId(userId),
     });
@@ -318,17 +321,6 @@ export class DashboardService {
     }
 
     return Math.min(100, Math.round((amount / total) * 100));
-  }
-
-  private getMonthRange(month?: string): MonthRange {
-    const normalizedMonth = month ?? new Date().toISOString().slice(0, 7);
-    const [year, monthNumber] = normalizedMonth.split('-').map(Number);
-
-    return {
-      end: new Date(Date.UTC(year, monthNumber, 1)),
-      month: normalizedMonth,
-      start: new Date(Date.UTC(year, monthNumber - 1, 1)),
-    };
   }
 
   private getAvailablePeriod(

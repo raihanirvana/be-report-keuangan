@@ -11,4 +11,8 @@ export class CreateBudgetDto {
   @Matches(/^\d{4}-\d{2}$/)
   @IsOptional()
   month?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  periodId?: string;
 }

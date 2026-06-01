@@ -19,6 +19,7 @@ export class DashboardController {
   ) {
     return envelope(await this.dashboardService.getSummary(user.sub, query), {
       month: query.month,
+      periodId: query.periodId,
     });
   }
 }

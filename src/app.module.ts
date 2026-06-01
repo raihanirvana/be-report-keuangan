@@ -8,6 +8,7 @@ import { BudgetsModule } from './modules/budgets/budgets.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
+import { PeriodsModule } from './modules/periods/periods.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { UsersModule } from './modules/users/users.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
@@ -25,6 +26,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
     CategoriesModule,
     DashboardModule,
     HealthModule,
+    PeriodsModule,
     TransactionsModule,
     UsersModule,
     WalletsModule,
