@@ -172,13 +172,11 @@ export class PeriodsService {
   }
 
   private parsePeriodDates(startDate: string, endDate: string) {
-    const start = this.toStartDate(startDate);
-    const end = this.toStartDate(endDate);
+    const start = this.toPeriodDate(startDate);
+    const end = this.toPeriodDate(endDate);
 
     if (end <= start) {
-      throw new BadRequestException(
-        'Tanggal akhir harus setelah tanggal mulai',
-      );
+      throw new BadRequestException('Waktu akhir harus setelah waktu mulai');
     }
 
     return { end, start };
@@ -219,14 +217,12 @@ export class PeriodsService {
     return null;
   }
 
-  private toStartDate(value: string) {
+  private toPeriodDate(value: string) {
     const date = new Date(value);
 
     if (Number.isNaN(date.getTime())) {
       throw new BadRequestException('Tanggal periode tidak valid');
     }
-
-    date.setUTCHours(0, 0, 0, 0);
 
     return date;
   }
@@ -249,13 +245,19 @@ export class PeriodsService {
   }
 
   private formatPeriodLabel(start: Date, end: Date) {
-    const startLabel = start.toLocaleDateString('id-ID', {
+    const startLabel = start.toLocaleString('id-ID', {
       day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
       month: 'short',
+      timeZone: 'Asia/Jakarta',
     });
-    const endLabel = end.toLocaleDateString('id-ID', {
+    const endLabel = end.toLocaleString('id-ID', {
       day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
       month: 'short',
+      timeZone: 'Asia/Jakarta',
       year: 'numeric',
     });
 

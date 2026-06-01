@@ -190,9 +190,9 @@ Response `200`:
     {
       "id": "6650f8e9b9f1f1a001234580",
       "name": "Gajian Juni",
-      "label": "29 Mei 2026 - 29 Jun 2026",
-      "startDate": "2026-05-29T00:00:00.000Z",
-      "endDate": "2026-06-29T00:00:00.000Z",
+      "label": "29 Mei, 00.00 - 29 Jun 2026, 12.00",
+      "startDate": "2026-05-28T17:00:00.000Z",
+      "endDate": "2026-06-29T05:00:00.000Z",
       "isCurrent": true
     }
   ],
@@ -213,12 +213,17 @@ Request:
 ```json
 {
   "name": "Gajian Juni",
-  "startDate": "2026-05-29",
-  "endDate": "2026-06-29"
+  "startDate": "2026-05-28T17:00:00.000Z",
+  "endDate": "2026-06-29T05:00:00.000Z"
 }
 ```
 
 Response `201`: period object.
+
+Behavior: `startDate` is inclusive and `endDate` is exclusive. A transaction is
+inside a period when `occurredAt >= startDate` and `occurredAt < endDate`.
+Use ISO datetime to preserve hour boundaries, for example a period can end on
+`1 Jun 12:00` and the next period can start on `1 Jun 14:00`.
 
 ### PATCH /periods/:periodId
 
