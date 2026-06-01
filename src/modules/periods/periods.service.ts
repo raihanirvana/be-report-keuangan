@@ -41,6 +41,8 @@ export class PeriodsService {
 
   async create(userId: string, payload: CreatePeriodDto) {
     const dates = this.parsePeriodDates(payload.startDate, payload.endDate);
+    await this.closeOverlappingPeriods(userId, dates.start);
+
     const period = await this.periodModel.create({
       endsAt: dates.end,
       isArchived: false,
@@ -171,6 +173,22 @@ export class PeriodsService {
     return this.parsePeriodDates(startDate, endDate);
   }
 
+  private async closeOverlappingPeriods(userId: string, startsAt: Date) {
+    await this.periodModel.updateMany(
+      {
+        endsAt: { $gt: startsAt },
+        isArchived: false,
+        startsAt: { $lt: startsAt },
+        userId: new Types.ObjectId(userId),
+      },
+      {
+        $set: {
+          endsAt: startsAt,
+        },
+      },
+    );
+  }
+
   private parsePeriodDates(startDate: string, endDate: string) {
     const start = this.toPeriodDate(startDate);
     const end = this.toPeriodDate(endDate);
@@ -245,17 +263,13 @@ export class PeriodsService {
   }
 
   private formatPeriodLabel(start: Date, end: Date) {
-    const startLabel = start.toLocaleString('id-ID', {
+    const startLabel = start.toLocaleDateString('id-ID', {
       day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
       month: 'short',
       timeZone: 'Asia/Jakarta',
     });
-    const endLabel = end.toLocaleString('id-ID', {
+    const endLabel = end.toLocaleDateString('id-ID', {
       day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
       month: 'short',
       timeZone: 'Asia/Jakarta',
       year: 'numeric',

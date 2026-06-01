@@ -190,7 +190,7 @@ Response `200`:
     {
       "id": "6650f8e9b9f1f1a001234580",
       "name": "Gajian Juni",
-      "label": "29 Mei, 00.00 - 29 Jun 2026, 12.00",
+      "label": "29 Mei - 29 Jun 2026",
       "startDate": "2026-05-28T17:00:00.000Z",
       "endDate": "2026-06-29T05:00:00.000Z",
       "isCurrent": true
@@ -222,8 +222,10 @@ Response `201`: period object.
 
 Behavior: `startDate` is inclusive and `endDate` is exclusive. A transaction is
 inside a period when `occurredAt >= startDate` and `occurredAt < endDate`.
-Use ISO datetime to preserve hour boundaries, for example a period can end on
-`1 Jun 12:00` and the next period can start on `1 Jun 14:00`.
+Clients can send ISO datetime to preserve hidden boundary time, but the UI does
+not need to expose time selection. When a new period starts inside an existing
+active period, backend closes the existing period at the new period's
+`startDate`, so period ranges do not overlap.
 
 ### PATCH /periods/:periodId
 
